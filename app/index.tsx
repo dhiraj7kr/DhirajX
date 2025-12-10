@@ -18,6 +18,22 @@ import TextInputField from '../src/components/TextInputField';
 import { useAppData } from '../src/context/AppDataContext';
 import { theme } from '../src/theme/theme';
 
+// ---------- QUOTES ARRAY ----------
+const QUOTES = [
+  {
+    text: '“One more Step at a Time”',
+    author: '— Personal mantra for progress'
+  },
+  {
+    text: '“It always seems impossible until it\'s done”',
+    author: '— Nelson Mandela'
+  },
+  {
+    text: '“Engineers are made to break the rules”',
+    author: '— Dk'
+  }
+];
+
 const HomeScreen: React.FC = () => {
   const { data, pickProfileImage, updateProfile } = useAppData();
   const { profile } = data;
@@ -99,6 +115,19 @@ const HomeScreen: React.FC = () => {
     setEditVisible(false);
   };
 
+  // ---------- QUOTE ROTATION LOGIC ----------
+  const [quoteIndex, setQuoteIndex] = useState(0);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setQuoteIndex((prev) => (prev + 1) % QUOTES.length);
+    }, 20000); // 20 seconds
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const currentQuote = QUOTES[quoteIndex];
+
   return (
     <ScrollView style={styles.container}>
       {/* HERO SECTION */}
@@ -140,18 +169,13 @@ const HomeScreen: React.FC = () => {
             />
           </TouchableOpacity>
         </View>
-
-        <View style={styles.quoteBox}>
-          <Text style={styles.quoteText}>"One more Step at a Time"</Text>
-          <Text style={styles.quoteSub}>— Personal mantra for progress</Text>
-        </View>
       </LinearGradient>
 
       {/* QUICK CONTACT ICONS */}
       <View style={styles.sectionSpacing}>
         <SectionHeader
           title="Connect with me"
-          subtitle="Choose how you’d like to reach out"
+          // subtitle removed as requested
         />
         <View style={styles.iconGrid}>
           <TouchableOpacity
@@ -195,6 +219,24 @@ const HomeScreen: React.FC = () => {
             <FontAwesome name="youtube-play" size={24} color="#FF0000" />
             <Text style={styles.iconLabel}>YouTube</Text>
           </TouchableOpacity>
+
+          {/* X (Twitter) */}
+          <TouchableOpacity
+            style={styles.iconButtonCard}
+            onPress={() => openLink('https://x.com/dhiraj7kr')}
+          >
+            <Ionicons name="logo-twitter" size={24} color="#111827" />
+            <Text style={styles.iconLabel}>X:Twitter</Text>
+          </TouchableOpacity>
+
+          {/* Instagram */}
+          <TouchableOpacity
+            style={styles.iconButtonCard}
+            onPress={() => openLink('https://instagram.com/dhiraj7kr')}
+          >
+            <FontAwesome name="instagram" size={24} color="#111827" />
+            <Text style={styles.iconLabel}>Instagram</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -202,7 +244,7 @@ const HomeScreen: React.FC = () => {
       <View style={styles.sectionSpacing}>
         <SectionHeader
           title="Today at a glance"
-          subtitle="Keep track of time & weather before you start"
+          // subtitle removed as requested
         />
         <View style={styles.infoRow}>
           {/* Calendar / Time card */}
@@ -268,11 +310,12 @@ const HomeScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* FOOTER TAGLINE */}
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          Crafted with React Native · Expo · AsyncStorage · AI & automation
-        </Text>
+      {/* QUOTE AT BOTTOM (CYCLING) */}
+      <View style={styles.bottomQuoteWrapper}>
+        <View style={styles.quoteBox}>
+          <Text style={styles.quoteText}>{currentQuote.text}</Text>
+          <Text style={styles.quoteSub}>{currentQuote.author}</Text>
+        </View>
       </View>
 
       {/* EDIT PROFILE MODAL */}
@@ -374,6 +417,7 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontSize: theme.fontSize.sm
   },
+  // reused quote styles, now only for bottom section
   quoteBox: {
     marginTop: theme.spacing(2),
     borderRadius: theme.radius.lg,
@@ -396,7 +440,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between'
   },
   iconButtonCard: {
-    width: '30%',
+    width: '23%', // 4 cards per row → 2 rows for 8 options
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.lg,
     paddingVertical: theme.spacing(1.5),
@@ -414,7 +458,8 @@ const styles = StyleSheet.create({
   iconLabel: {
     marginTop: 6,
     fontSize: theme.fontSize.xs,
-    color: theme.colors.text
+    color: theme.colors.text,
+    textAlign: 'center'
   },
   infoRow: {
     flexDirection: 'row',
@@ -497,15 +542,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 0
   },
-  footer: {
+  bottomQuoteWrapper: {
     marginTop: theme.spacing(3),
-    marginBottom: theme.spacing(3),
-    alignItems: 'center'
-  },
-  footerText: {
-    color: theme.colors.textSecondary,
-    fontSize: theme.fontSize.xs,
-    textAlign: 'center'
+    marginBottom: theme.spacing(3)
   },
   modalBackdrop: {
     flex: 1,
