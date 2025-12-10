@@ -2,6 +2,8 @@ export type SocialLinks = {
   github: string;
   linkedin: string;
   website?: string;
+  medium?: string;
+  youtube?: string;
 };
 
 export type Profile = {
@@ -66,7 +68,7 @@ export type AppData = {
 };
 
 export const defaultData: AppData = {
-  profile: {
+    profile: {
     name: 'Dhiraj Kumar',
     role: 'Software Engineer',
     tagline:
@@ -75,12 +77,14 @@ export const defaultData: AppData = {
     phone: '+91-9472826071',
     email: 'dhiraj7kr@gmail.com',
     social: {
-      // 🔁 Update these to your exact URLs if different
       github: 'https://github.com/dhiraj7kr',
       linkedin: 'https://www.linkedin.com/in/dhiraj7kr',
-      website: ''
+      website: '',
+      medium: 'https://medium.com/@dhiraj7kr',   // <- put your real link
+      youtube: 'https://www.youtube.com/@dhiraj7kr' // <- put your real link
     }
   },
+
 
   projects: [
     {
