@@ -1,5 +1,6 @@
 import { Feather, FontAwesome, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -12,6 +13,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+
 import IconButton from '../src/components/IconButton';
 import SectionHeader from '../src/components/SectionHeader';
 import TextInputField from '../src/components/TextInputField';
@@ -37,6 +39,8 @@ const QUOTES = [
 const HomeScreen: React.FC = () => {
   const { data, pickProfileImage, updateProfile } = useAppData();
   const { profile } = data;
+
+  const router = useRouter();
 
   // profile edit
   const [editVisible, setEditVisible] = useState(false);
@@ -115,208 +119,221 @@ const HomeScreen: React.FC = () => {
     setEditVisible(false);
   };
 
-  // ---------- QUOTE ROTATION LOGIC ----------
+  // ---------- QUOTE ROTATION ----------
   const [quoteIndex, setQuoteIndex] = useState(0);
 
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      setQuoteIndex((prev) => (prev + 1) % QUOTES.length);
-    }, 20000); // 20 seconds
-
+    const intervalId = setInterval(
+      () => setQuoteIndex((prev) => (prev + 1) % QUOTES.length),
+      20000 // 20 seconds
+    );
     return () => clearInterval(intervalId);
   }, []);
 
   const currentQuote = QUOTES[quoteIndex];
 
   return (
-    <ScrollView style={styles.container}>
-      {/* HERO SECTION */}
-      <LinearGradient
-        colors={['#EEF2FF', '#EFF6FF', '#F9FAFB']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.heroCard}
+    <View style={styles.screen}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroTopRow}>
-          <TouchableOpacity onPress={pickProfileImage}>
-            {profile.avatarUri ? (
-              <Image source={{ uri: profile.avatarUri }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                <Text style={styles.avatarInitials}>
-                  {profile.name
-                    .split(' ')
-                    .map((s) => s[0])
-                    .join('')
-                    .toUpperCase()}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+        {/* HERO SECTION */}
+        <LinearGradient
+          colors={['#EEF2FF', '#EFF6FF', '#F9FAFB']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.heroCard}
+        >
+          <View style={styles.heroTopRow}>
+            <TouchableOpacity onPress={pickProfileImage}>
+              {profile.avatarUri ? (
+                <Image source={{ uri: profile.avatarUri }} style={styles.avatar} />
+              ) : (
+                <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                  <Text style={styles.avatarInitials}>
+                    {profile.name
+                      .split(' ')
+                      .map((s) => s[0])
+                      .join('')
+                      .toUpperCase()}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
 
-          <View style={styles.heroTextContainer}>
-            <Text style={styles.smallLabel}>PORTFOLIO · DHIRAJ X</Text>
-            <Text style={styles.name}>{profile.name}</Text>
-            <Text style={styles.role}>{profile.role}</Text>
-            <Text style={styles.location}>{profile.location}</Text>
-          </View>
-
-          <TouchableOpacity onPress={() => setEditVisible(true)}>
-            <Ionicons
-              name="pencil"
-              size={22}
-              color={theme.colors.textSecondary}
-            />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
-
-      {/* QUICK CONTACT ICONS */}
-      <View style={styles.sectionSpacing}>
-        <SectionHeader
-          title="Connect with me"
-          // subtitle removed as requested
-        />
-        <View style={styles.iconGrid}>
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink(profile.social.github)}
-          >
-            <FontAwesome name="github" size={24} color="#111827" />
-            <Text style={styles.iconLabel}>GitHub</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink(profile.social.linkedin)}
-          >
-            <FontAwesome name="linkedin-square" size={24} color="#0A66C2" />
-            <Text style={styles.iconLabel}>LinkedIn</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.iconButtonCard} onPress={openMail}>
-            <Feather name="mail" size={24} color="#EA4335" />
-            <Text style={styles.iconLabel}>Email</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.iconButtonCard} onPress={openPhone}>
-            <Feather name="phone-call" size={24} color="#16A34A" />
-            <Text style={styles.iconLabel}>Call</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink(profile.social.medium)}
-          >
-            <FontAwesome name="medium" size={24} color="#111827" />
-            <Text style={styles.iconLabel}>Medium</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink(profile.social.youtube)}
-          >
-            <FontAwesome name="youtube-play" size={24} color="#FF0000" />
-            <Text style={styles.iconLabel}>YouTube</Text>
-          </TouchableOpacity>
-
-          {/* X (Twitter) */}
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink('https://x.com/dhiraj7kr')}
-          >
-            <Ionicons name="logo-twitter" size={24} color="#111827" />
-            <Text style={styles.iconLabel}>X:Twitter</Text>
-          </TouchableOpacity>
-
-          {/* Instagram */}
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink('https://instagram.com/dhiraj7kr')}
-          >
-            <FontAwesome name="instagram" size={24} color="#111827" />
-            <Text style={styles.iconLabel}>Instagram</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* DATE & TIME + WEATHER */}
-      <View style={styles.sectionSpacing}>
-        <SectionHeader
-          title="Today at a glance"
-          // subtitle removed as requested
-        />
-        <View style={styles.infoRow}>
-          {/* Calendar / Time card */}
-          <View style={styles.infoCard}>
-            <View style={styles.infoCardHeader}>
-              <Ionicons
-                name="calendar-outline"
-                size={20}
-                color={theme.colors.primary}
-              />
-              <Text style={styles.infoCardTitle}>Calendar</Text>
+            <View style={styles.heroTextContainer}>
+              <Text style={styles.smallLabel}>PORTFOLIO · DHIRAJ X</Text>
+              <Text style={styles.name}>{profile.name}</Text>
+              <Text style={styles.role}>{profile.role}</Text>
+              <Text style={styles.location}>{profile.location}</Text>
             </View>
-            <Text style={styles.dayName}>{dayName}</Text>
-            <Text style={styles.dateText}>{dateStr}</Text>
-            <View style={styles.timeRow}>
+
+            <TouchableOpacity onPress={() => setEditVisible(true)}>
               <Ionicons
-                name="time-outline"
-                size={18}
+                name="pencil"
+                size={22}
                 color={theme.colors.textSecondary}
               />
-              <Text style={styles.timeText}>{timeStr}</Text>
-            </View>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+
+        {/* QUICK CONTACT ICONS */}
+        <View style={styles.sectionSpacing}>
+          <SectionHeader title="Connect with me" />
+          <View style={styles.iconGrid}>
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink(profile.social.github)}
+            >
+              <FontAwesome name="github" size={24} color="#111827" />
+              <Text style={styles.iconLabel}>GitHub</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink(profile.social.linkedin)}
+            >
+              <FontAwesome name="linkedin-square" size={24} color="#0A66C2" />
+              <Text style={styles.iconLabel}>LinkedIn</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.iconButtonCard} onPress={openMail}>
+              <Feather name="mail" size={24} color="#EA4335" />
+              <Text style={styles.iconLabel}>Email</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.iconButtonCard} onPress={openPhone}>
+              <Feather name="phone-call" size={24} color="#16A34A" />
+              <Text style={styles.iconLabel}>Call</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink(profile.social.medium)}
+            >
+              <FontAwesome name="medium" size={24} color="#111827" />
+              <Text style={styles.iconLabel}>Medium</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink(profile.social.youtube)}
+            >
+              <FontAwesome name="youtube-play" size={24} color="#FF0000" />
+              <Text style={styles.iconLabel}>YouTube</Text>
+            </TouchableOpacity>
+
+            {/* X (Twitter) */}
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink('https://x.com/dhiraj7kr')}
+            >
+              <Ionicons name="logo-twitter" size={24} color="#111827" />
+              <Text style={styles.iconLabel}>X:Twitter</Text>
+            </TouchableOpacity>
+
+            {/* Instagram */}
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink('https://instagram.com/dhiraj7kr')}
+            >
+              <FontAwesome name="instagram" size={24} color="#111827" />
+              <Text style={styles.iconLabel}>Instagram</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* DATE & TIME + WEATHER */}
+        <View style={styles.sectionSpacing}>
+          {/* Header row with "View planner" */}
+          <View style={styles.headerRow}>
+            <SectionHeader title="Today at a glance" />
+            <TouchableOpacity
+              onPress={() => router.push('/planner')}
+              style={styles.viewPlannerButton}
+            >
+              <Text style={styles.viewPlannerText}>View planner →</Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Weather card */}
-          <LinearGradient
-            colors={['#DBEAFE', '#F9FAFB']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.infoCard, styles.weatherCard]}
-          >
-            <View style={styles.infoCardHeader}>
-              <Ionicons
-                name="partly-sunny-outline"
-                size={20}
-                color={theme.colors.primary}
-              />
-              <Text style={styles.infoCardTitle}>Weather</Text>
-            </View>
-
-            <View style={styles.weatherRow}>
-              <View>
-                <Text style={styles.temperature}>{weather.temperature}</Text>
-                <Text style={styles.weatherCondition}>
-                  {weather.condition}
-                </Text>
-                <Text style={styles.cityText}>{weather.city}</Text>
+          <View style={styles.infoRow}>
+            {/* Calendar / Time card */}
+            <View style={styles.infoCard}>
+              <View style={styles.infoCardHeader}>
+                <Ionicons
+                  name="calendar-outline"
+                  size={20}
+                  color={theme.colors.primary}
+                />
+                <Text style={styles.infoCardTitle}>Calendar</Text>
               </View>
-
-              <View style={styles.weatherIconArea}>
-                <Ionicons name="sunny" size={30} color="#FDBA74" />
-                <Animated.View
-                  style={[
-                    styles.cloudIconWrapper,
-                    { transform: [{ translateX: cloudTranslateX }] }
-                  ]}
-                >
-                  <Ionicons name="cloud" size={30} color="#9CA3AF" />
-                </Animated.View>
+              <Text style={styles.dayName}>{dayName}</Text>
+              <Text style={styles.dateText}>{dateStr}</Text>
+              <View style={styles.timeRow}>
+                <Ionicons
+                  name="time-outline"
+                  size={18}
+                  color={theme.colors.textSecondary}
+                />
+                <Text style={styles.timeText}>{timeStr}</Text>
               </View>
             </View>
-          </LinearGradient>
-        </View>
-      </View>
 
-      {/* QUOTE AT BOTTOM (CYCLING) */}
-      <View style={styles.bottomQuoteWrapper}>
-        <View style={styles.quoteBox}>
-          <Text style={styles.quoteText}>{currentQuote.text}</Text>
-          <Text style={styles.quoteSub}>{currentQuote.author}</Text>
+            {/* Weather card */}
+            <LinearGradient
+              colors={['#DBEAFE', '#F9FAFB']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.infoCard, styles.weatherCard]}
+            >
+              <View style={styles.infoCardHeader}>
+                <Ionicons
+                  name="partly-sunny-outline"
+                  size={20}
+                  color={theme.colors.primary}
+                />
+                <Text style={styles.infoCardTitle}>Weather</Text>
+              </View>
+
+              <View style={styles.weatherRow}>
+                <View>
+                  <Text style={styles.temperature}>{weather.temperature}</Text>
+                  <Text style={styles.weatherCondition}>
+                    {weather.condition}
+                  </Text>
+                  <Text style={styles.cityText}>{weather.city}</Text>
+                </View>
+
+                <View style={styles.weatherIconArea}>
+                  <Ionicons name="sunny" size={30} color="#FDBA74" />
+                  <Animated.View
+                    style={[
+                      styles.cloudIconWrapper,
+                      { transform: [{ translateX: cloudTranslateX }] }
+                    ]}
+                  >
+                    <Ionicons name="cloud" size={30} color="#9CA3AF" />
+                  </Animated.View>
+                </View>
+              </View>
+            </LinearGradient>
+          </View>
         </View>
-      </View>
+
+        {/* QUOTE AT BOTTOM (CYCLING) */}
+        <View style={styles.bottomQuoteWrapper}>
+          <View style={styles.quoteBox}>
+            <Text style={styles.quoteText}>{currentQuote.text}</Text>
+            <Text style={styles.quoteSub}>{currentQuote.author}</Text>
+          </View>
+        </View>
+
+        {/* Extra bottom spacer so content doesn't stick to bottom edge */}
+        <View style={{ height: theme.spacing(1) }} />
+      </ScrollView>
 
       {/* EDIT PROFILE MODAL */}
       <Modal visible={editVisible} transparent animationType="slide">
@@ -335,7 +352,11 @@ const HomeScreen: React.FC = () => {
               <IconButton
                 label="Cancel"
                 onPress={() => setEditVisible(false)}
-                style={{ backgroundColor: theme.colors.border, flex: 1, marginRight: 8 }}
+                style={{
+                  backgroundColor: theme.colors.border,
+                  flex: 1,
+                  marginRight: 8
+                }}
               />
               <IconButton
                 label="Save"
@@ -346,21 +367,33 @@ const HomeScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+    </View>
   );
 };
 
 export default HomeScreen;
 
 const styles = StyleSheet.create({
-  container: {
+  // full screen background
+  screen: {
     flex: 1,
-    backgroundColor: theme.colors.background,
-    padding: theme.spacing(2)
+    backgroundColor: theme.colors.background
   },
+  // scroll view itself
+  container: {
+    flex: 1
+  },
+  // padding & spacing *inside* the scroll content
+  contentContainer: {
+    paddingHorizontal: theme.spacing(2),
+    paddingTop: theme.spacing(17),   // distance from top
+    paddingBottom: theme.spacing(4) // distance from bottom / quote
+  },
+
   sectionSpacing: {
     marginTop: theme.spacing(3)
   },
+
   heroCard: {
     borderRadius: theme.radius.xl,
     padding: theme.spacing(2),
@@ -417,12 +450,14 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontSize: theme.fontSize.sm
   },
-  // reused quote styles, now only for bottom section
+
   quoteBox: {
-    marginTop: theme.spacing(2),
     borderRadius: theme.radius.lg,
-    padding: theme.spacing(1.5),
-    backgroundColor: 'rgba(255,255,255,0.8)'
+    paddingVertical: theme.spacing(2),
+    paddingHorizontal: theme.spacing(2),
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderWidth: 1,
+    borderColor: theme.colors.border
   },
   quoteText: {
     color: theme.colors.text,
@@ -434,13 +469,15 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.xs,
     marginTop: 4
   },
+
   iconGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    marginTop: theme.spacing(1.5)
   },
   iconButtonCard: {
-    width: '23%', // 4 cards per row → 2 rows for 8 options
+    width: '23%', // 4 cards per row
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.lg,
     paddingVertical: theme.spacing(1.5),
@@ -461,9 +498,28 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     textAlign: 'center'
   },
+
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  viewPlannerButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#E0ECFF'
+  },
+  viewPlannerText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.primary,
+    fontWeight: '600'
+  },
+
   infoRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    marginTop: theme.spacing(1.5)
   },
   infoCard: {
     flex: 1,
@@ -514,6 +570,7 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.base,
     fontWeight: '600'
   },
+
   weatherRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -542,10 +599,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 0
   },
+
   bottomQuoteWrapper: {
-    marginTop: theme.spacing(3),
-    marginBottom: theme.spacing(3)
+    marginTop: theme.spacing(4),
+    marginBottom: theme.spacing(1)
   },
+
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.3)',

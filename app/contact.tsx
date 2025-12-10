@@ -75,193 +75,250 @@ const ContactScreen: React.FC = () => {
   };
 
   return (
-    <ScrollView style={styles.container}>
-      {/* Futuristic hero card */}
-      <LinearGradient
-        colors={['#EEF2FF', '#EFF6FF', '#F9FAFB']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.heroCard}
+    <View style={styles.screen}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroHeaderRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.heroLabel}>LET&apos;S CONNECT</Text>
-            <Text style={styles.heroTitle}>Work with Dhiraj</Text>
-            <Text style={styles.heroSubtitle}>
-              Open to roles in Software Engineering, AI-powered systems, and full-stack
-              development. Let&apos;s build something impactful together.
-            </Text>
-          </View>
-          <Ionicons name="chatbubbles-outline" size={30} color={theme.colors.primary} />
-        </View>
-
-        <View style={styles.heroMetaRow}>
-          <View style={styles.heroMetaItem}>
-            <Ionicons name="time-outline" size={18} color={theme.colors.primaryDark} />
-            <Text style={styles.heroMetaText}>Response: within 24 hours</Text>
-          </View>
-          <View style={styles.heroMetaItem}>
-            <Ionicons name="globe-outline" size={18} color={theme.colors.primaryDark} />
-            <Text style={styles.heroMetaText}>Timezone: IST (UTC+5:30)</Text>
-          </View>
-        </View>
-      </LinearGradient>
-
-      {/* Contact info + map row */}
-      <View style={styles.infoRow}>
-        {/* Direct contact card */}
-        <View style={styles.infoCard}>
-          <View style={styles.infoCardHeader}>
+        {/* Futuristic hero card */}
+        <LinearGradient
+          colors={['#EEF2FF', '#EFF6FF', '#F9FAFB']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.heroCard}
+        >
+          <View style={styles.heroHeaderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heroLabel}>LET&apos;S CONNECT</Text>
+              <Text style={styles.heroTitle}>Work with Dhiraj</Text>
+              <Text style={styles.heroSubtitle}>
+                Open to roles in Software Engineering, AI-powered systems, and
+                full-stack development. Let&apos;s build something impactful
+                together.
+              </Text>
+            </View>
             <Ionicons
-              name="person-circle-outline"
-              size={22}
+              name="chatbubbles-outline"
+              size={30}
               color={theme.colors.primary}
             />
-            <Text style={styles.infoCardTitle}>Direct Contact</Text>
           </View>
 
-          <Text style={styles.infoLabel}>Email</Text>
-          <TouchableOpacity onPress={openMail}>
-            <Text style={[styles.infoValue, styles.infoLink]}>{contact.email}</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.infoLabel}>Phone</Text>
-          <TouchableOpacity onPress={openPhone}>
-            <Text style={[styles.infoValue, styles.infoLink]}>{contact.phone}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Map card (replaces plain location text) */}
-        <TouchableOpacity style={styles.mapCard} onPress={openMap} activeOpacity={0.9}>
-          <LinearGradient
-            colors={['#DBEAFE', '#EFF6FF']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.mapGradient}
-          >
-            <View style={styles.infoCardHeader}>
+          <View style={styles.heroMetaRow}>
+            <View style={styles.heroMetaItem}>
               <Ionicons
-                name="location-outline"
-                size={22}
+                name="time-outline"
+                size={18}
                 color={theme.colors.primaryDark}
               />
-              <Text style={styles.infoCardTitle}>Location & Map</Text>
+              <Text style={styles.heroMetaText}>Response: within 24 hours</Text>
             </View>
-            <Text style={styles.infoLabel}>Base Location</Text>
-            <Text style={styles.infoValue}>{profile.location}</Text>
+            <View style={styles.heroMetaItem}>
+              <Ionicons
+                name="globe-outline"
+                size={18}
+                color={theme.colors.primaryDark}
+              />
+              <Text style={styles.heroMetaText}>Timezone: IST (UTC+5:30)</Text>
+            </View>
+          </View>
+        </LinearGradient>
 
-            <View style={styles.mapPreview}>
-              <View style={styles.mapLineHorizontal} />
-              <View style={styles.mapLineVertical} />
-              <View style={styles.mapPin}>
-                <Ionicons name="pin" size={18} color="#EF4444" />
+        {/* Contact info + map row */}
+        <View style={styles.sectionSpacing}>
+          <View style={styles.infoRow}>
+            {/* Direct contact card */}
+            <View style={styles.infoCard}>
+              <View style={styles.infoCardHeader}>
+                <Ionicons
+                  name="person-circle-outline"
+                  size={22}
+                  color={theme.colors.primary}
+                />
+                <Text style={styles.infoCardTitle}>Direct Contact</Text>
               </View>
+
+              <Text style={styles.infoLabel}>Email</Text>
+              <TouchableOpacity onPress={openMail}>
+                <Text style={[styles.infoValue, styles.infoLink]}>
+                  {contact.email}
+                </Text>
+              </TouchableOpacity>
+
+              <Text style={styles.infoLabel}>Phone</Text>
+              <TouchableOpacity onPress={openPhone}>
+                <Text style={[styles.infoValue, styles.infoLink]}>
+                  {contact.phone}
+                </Text>
+              </TouchableOpacity>
             </View>
-            <Text style={styles.mapHint}>Tap to open in Google Maps</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
 
-      {/* Contact form */}
-      <View style={styles.sectionSpacing}>
-        <SectionHeader
-          title="Send a message"
-          subtitle="Share a bit about your project or role, and I’ll get back to you."
-        />
+            {/* Map card */}
+            <TouchableOpacity
+              style={styles.mapCard}
+              onPress={openMap}
+              activeOpacity={0.9}
+            >
+              <LinearGradient
+                colors={['#DBEAFE', '#EFF6FF']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.mapGradient}
+              >
+                <View style={styles.infoCardHeader}>
+                  <Ionicons
+                    name="location-outline"
+                    size={22}
+                    color={theme.colors.primaryDark}
+                  />
+                  <Text style={styles.infoCardTitle}>Location & Map</Text>
+                </View>
+                <Text style={styles.infoLabel}>Base Location</Text>
+                <Text style={styles.infoValue}>{profile.location}</Text>
 
-        <View style={styles.formCard}>
-          <TextInputField label="Your Name" value={name} onChangeText={setName} />
-          <TextInputField
-            label="Your Email"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-          />
-          <TextInputField
-            label="Message"
-            value={message}
-            onChangeText={setMessage}
-            multiline
-          />
-
-          <IconButton label="Send Message" onPress={sendMessage} />
+                <View style={styles.mapPreview}>
+                  <View style={styles.mapLineHorizontal} />
+                  <View style={styles.mapLineVertical} />
+                  <View style={styles.mapPin}>
+                    <Ionicons name="pin" size={18} color="#EF4444" />
+                  </View>
+                </View>
+                <Text style={styles.mapHint}>Tap to open in Google Maps</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
 
-      {/* Social / connect grid - similar to Home, with Telegram */}
-      <View style={styles.sectionSpacing}>
-        <SectionHeader
-          title="Connect via"
-          subtitle="Choose the channel that works best for you."
-        />
+        {/* Contact form */}
+        <View style={styles.sectionSpacing}>
+          <SectionHeader
+            title="Send a message"
+            subtitle="Share a bit about your project or role, and I’ll get back to you."
+          />
 
-        <View style={styles.iconGrid}>
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink(profile.social.github)}
-          >
-            <FontAwesome name="github" size={24} color="#111827" />
-            <Text style={styles.iconLabel}>GitHub</Text>
-          </TouchableOpacity>
+          <View style={styles.formCard}>
+            <TextInputField label="Your Name" value={name} onChangeText={setName} />
+            <TextInputField
+              label="Your Email"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+            />
+            <TextInputField
+              label="Message"
+              value={message}
+              onChangeText={setMessage}
+              multiline
+            />
 
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink(profile.social.linkedin)}
-          >
-            <FontAwesome name="linkedin-square" size={24} color="#0A66C2" />
-            <Text style={styles.iconLabel}>LinkedIn</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.iconButtonCard} onPress={openMail}>
-            <Feather name="mail" size={24} color="#EA4335" />
-            <Text style={styles.iconLabel}>Email</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.iconButtonCard} onPress={openPhone}>
-            <Feather name="phone-call" size={24} color="#16A34A" />
-            <Text style={styles.iconLabel}>Call</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink(profile.social.medium)}
-          >
-            <FontAwesome name="medium" size={24} color="#111827" />
-            <Text style={styles.iconLabel}>Medium</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.iconButtonCard}
-            onPress={() => openLink(profile.social.youtube)}
-          >
-            <FontAwesome name="youtube-play" size={24} color="#FF0000" />
-            <Text style={styles.iconLabel}>YouTube</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.iconButtonCard} onPress={openTelegram}>
-            <FontAwesome name="telegram" size={24} color="#0088cc" />
-            <Text style={styles.iconLabel}>Telegram</Text>
-          </TouchableOpacity>
+            <IconButton label="Send Message" onPress={sendMessage} />
+          </View>
         </View>
-      </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          Prefer async communication? Drop me an email or Telegram message anytime.
-        </Text>
-      </View>
-    </ScrollView>
+        {/* Social / connect grid */}
+        <View style={styles.sectionSpacing}>
+          <SectionHeader
+            title="Connect via"
+            subtitle="Choose the channel that works best for you."
+          />
+
+          <View style={styles.iconGrid}>
+            {/* LinkedIn */}
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink(profile.social.linkedin)}
+            >
+              <FontAwesome name="linkedin-square" size={24} color="#0A66C2" />
+              <Text style={styles.iconLabel}>LinkedIn</Text>
+            </TouchableOpacity>
+
+            {/* Email */}
+            <TouchableOpacity style={styles.iconButtonCard} onPress={openMail}>
+              <Feather name="mail" size={24} color="#EA4335" />
+              <Text style={styles.iconLabel}>Email</Text>
+            </TouchableOpacity>
+
+            {/* Call */}
+            <TouchableOpacity style={styles.iconButtonCard} onPress={openPhone}>
+              <Feather name="phone-call" size={24} color="#16A34A" />
+              <Text style={styles.iconLabel}>Call</Text>
+            </TouchableOpacity>
+
+            {/* Medium */}
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink(profile.social.medium)}
+            >
+              <FontAwesome name="medium" size={24} color="#111827" />
+              <Text style={styles.iconLabel}>Medium</Text>
+            </TouchableOpacity>
+
+            {/* YouTube */}
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink(profile.social.youtube)}
+            >
+              <FontAwesome name="youtube-play" size={24} color="#FF0000" />
+              <Text style={styles.iconLabel}>YouTube</Text>
+            </TouchableOpacity>
+
+            {/* X (Twitter) */}
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink('https://x.com/dhiraj7kr')}
+            >
+              <Ionicons name="logo-twitter" size={24} color="#111827" />
+              <Text style={styles.iconLabel}>X:Twitter</Text>
+            </TouchableOpacity>
+
+            {/* Instagram */}
+            <TouchableOpacity
+              style={styles.iconButtonCard}
+              onPress={() => openLink('https://instagram.com/dhiraj7kr')}
+            >
+              <FontAwesome name="instagram" size={24} color="#111827" />
+              <Text style={styles.iconLabel}>Instagram</Text>
+            </TouchableOpacity>
+
+            {/* Telegram */}
+            <TouchableOpacity style={styles.iconButtonCard} onPress={openTelegram}>
+              <FontAwesome name="telegram" size={24} color="#0088cc" />
+              <Text style={styles.iconLabel}>Telegram</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Footer text with comfy bottom space */}
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
+            Prefer async communication? Drop me an email or Telegram message anytime.
+          </Text>
+        </View>
+      </ScrollView>
+    </View>
   );
 };
 
 export default ContactScreen;
 
 const styles = StyleSheet.create({
-  container: {
+  // Full-screen background
+  screen: {
     flex: 1,
-    backgroundColor: theme.colors.background,
-    padding: theme.spacing(2)
+    backgroundColor: theme.colors.background
   },
+  // ScrollView
+  container: {
+    flex: 1
+  },
+  // Inner spacing for content
+  contentContainer: {
+    paddingHorizontal: theme.spacing(2),
+    paddingTop: theme.spacing(10), // distance from top
+    paddingBottom: theme.spacing(4) // distance from bottom/footer
+  },
+
   sectionSpacing: {
     marginTop: theme.spacing(3)
   },
@@ -317,7 +374,7 @@ const styles = StyleSheet.create({
   // Info + map row
   infoRow: {
     flexDirection: 'row',
-    marginTop: theme.spacing(2)
+    marginTop: theme.spacing(1.5)
   },
   infoCard: {
     flex: 1,
@@ -419,17 +476,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
-    elevation: 1
+    elevation: 1,
+    marginTop: theme.spacing(1.5)
   },
 
-  // Social icon grid
+  // Social icon grid (2 rows × 4 icons)
   iconGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    marginTop: theme.spacing(1.5)
   },
   iconButtonCard: {
-    width: '30%',
+    width: '23%', // 4 per row
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.lg,
     paddingVertical: theme.spacing(1.5),
@@ -447,12 +506,12 @@ const styles = StyleSheet.create({
   iconLabel: {
     marginTop: 6,
     fontSize: theme.fontSize.xs,
-    color: theme.colors.text
+    color: theme.colors.text,
+    textAlign: 'center'
   },
 
   footer: {
     marginTop: theme.spacing(3),
-    marginBottom: theme.spacing(3),
     alignItems: 'center'
   },
   footerText: {
