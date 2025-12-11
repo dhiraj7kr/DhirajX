@@ -1,11 +1,11 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import React, {
-    createContext,
-    ReactNode,
-    useContext,
-    useEffect,
-    useState
+  createContext,
+  ReactNode,
+  useContext,
+  useEffect,
+  useState
 } from 'react';
 import { AppData, defaultData, Profile, Project } from '../data/defaultData';
 import { loadAppData, saveAppData } from '../storage/storage';
@@ -59,11 +59,31 @@ export const AppDataProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const copyToAppStorage = async (uri: string): Promise<string> => {
-    const filename = uri.split('/').pop() ?? `image-${Date.now()}.jpg`;
-    const dest = `${FileSystem.documentDirectory}${filename}`;
-    await FileSystem.copyAsync({ from: uri, to: dest });
-    return dest;
-  };
+  try {
+    const fileName =
+      uri.split('/').pop() ?? `avatar-${Date.now().toString()}.jpg`;
+
+    const dir = `${FileSystem.documentDirectory}profile`;
+
+    // Ensure profile/ directory exists
+    const dirInfo = await FileSystem.getInfoAsync(dir);
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    }
+
+    const destUri = `${dir}/${fileName}`;
+
+    // This is the legacy copyAsync, now safely imported from expo-file-system/legacy
+    await FileSystem.copyAsync({ from: uri, to: destUri });
+
+    return destUri;
+  } catch (error) {
+    console.log('copyToAppStorage error', error);
+    // Fallback: just return the original uri if something fails
+    return uri;
+  }
+};
+
 
   const pickProfileImage = async () => {
     const allowed = await ensurePermissions();

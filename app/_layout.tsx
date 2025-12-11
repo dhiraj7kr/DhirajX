@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import TaskAlarmHandler from '../src/components/TaskAlarmHandler';
 import { AppDataProvider, useAppData } from '../src/context/AppDataContext';
 import { theme } from '../src/theme/theme';
 
@@ -67,7 +68,9 @@ function InnerLayout() {
 export default function RootLayout() {
   return (
     <AppDataProvider>
-      <InnerLayout />
+      <TaskAlarmHandler>
+        <InnerLayout />
+      </TaskAlarmHandler>
     </AppDataProvider>
   );
 }

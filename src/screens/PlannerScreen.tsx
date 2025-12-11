@@ -1,11 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DateTimePicker, {
-  DateTimePickerEvent
-} from '@react-native-community/datetimepicker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,39 +13,67 @@ import {
   View
 } from 'react-native';
 import { theme } from '../theme/theme';
+import {
+  AlarmLeadMinutes,
+  AlarmMode,
+  cancelReminderById,
+  initTaskAlarms,
+  scheduleTaskReminder
+} from '../utils/alarmManager';
 
 type RepeatRule = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 type TaskType = 'task' | 'event';
-type ReminderMode = 'silent' | 'vibrate' | 'tone';
-type ViewMode = 'day' | 'week' | 'month';
 
 interface Task {
   id: string;
   title: string;
   date: string; // base date: 'YYYY-MM-DD'
-  startTime?: string; // 'HH:mm'
-  endTime?: string;   // 'HH:mm'
-  notes?: string;     // description
+  startTime?: string;
+  endTime?: string;
+  notes?: string; // description / details
   link?: string;
-  associatedWith?: string;
+  associated?: string;
   isCompleted: boolean;
   repeat: RepeatRule;
   type: TaskType;
-  reminderMinutesBefore?: number; // 0 | 5 | 30
-  reminderMode?: ReminderMode;
   createdAt: string;
   updatedAt: string;
+
+  // Alarm-related fields
+  reminderLeadMinutes?: AlarmLeadMinutes;
+  alarmMode?: AlarmMode;
+  notificationId?: string | null;
 }
 
-const STORAGE_KEY = 'plannerTasks_v1';
+const STORAGE_KEY = 'plannerTasks_v2';
 
-// --- Helpers ---
+// --- Date helpers ---
 const toDate = (isoDate: string) => new Date(isoDate + 'T00:00:00');
 
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
   a.getDate() === b.getDate();
+
+const formatYMD = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
+
+const formatShortDate = (d: Date) =>
+  d.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+
+const formatDateLabel = (d: Date) =>
+  d.toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
 
 const occursOnDate = (task: Task, dateStr: string): boolean => {
   const base = toDate(task.date);
@@ -75,39 +102,14 @@ const occursOnDate = (task: Task, dateStr: string): boolean => {
   }
 };
 
-const formatDateLabel = (d: Date) =>
-  d.toLocaleDateString(undefined, {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
-  });
-
-const formatShortDate = (d: Date) =>
-  d.toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric'
-  });
-
-const ymdFromDate = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-    d.getDate()
-  ).padStart(2, '0')}`;
-
-const formatTimeFromDate = (d: Date) =>
-  `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(
-    2,
-    '0'
-  )}`;
-
+// --- Planner screen ---
 const PlannerScreen: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
 
-  // view mode
-  const [viewMode, setViewMode] = useState<ViewMode>('day');
+  // view mode: day / week / month
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('day');
 
   // modal & form state
   const [modalVisible, setModalVisible] = useState(false);
@@ -115,20 +117,26 @@ const PlannerScreen: React.FC = () => {
 
   const [title, setTitle] = useState('');
   const [type, setType] = useState<TaskType>('task');
-  const [taskDate, setTaskDate] = useState<Date>(new Date()); // for picker
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [notes, setNotes] = useState('');
   const [link, setLink] = useState('');
-  const [associatedWith, setAssociatedWith] = useState('');
+  const [associated, setAssociated] = useState('');
   const [repeat, setRepeat] = useState<RepeatRule>('none');
-  const [reminderMinutesBefore, setReminderMinutesBefore] = useState<number>(0);
-  const [reminderMode, setReminderMode] = useState<ReminderMode>('silent');
 
-  // pickers
+  // date & time picker state for the form
+  const [formDate, setFormDate] = useState<Date>(selectedDate);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showStartTimePicker, setShowStartTimePicker] = useState(false);
-  const [showEndTimePicker, setShowEndTimePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  // alarm form state
+  const [alarmLead, setAlarmLead] = useState<AlarmLeadMinutes>(0);
+  const [alarmMode, setAlarmMode] = useState<AlarmMode>('sound');
+
+  // --- Init alarms once ---
+  useEffect(() => {
+    initTaskAlarms();
+  }, []);
 
   // --- Load & save from AsyncStorage ---
   useEffect(() => {
@@ -176,8 +184,12 @@ const PlannerScreen: React.FC = () => {
     return new Date(y, m, 1).getDay(); // 0 = Sunday
   }, [currentMonth]);
 
-  const selectedDateStr = useMemo(() => ymdFromDate(selectedDate), [selectedDate]);
+  const selectedDateStr = useMemo(
+    () => formatYMD(selectedDate),
+    [selectedDate]
+  );
 
+  // --- Tasks filtering for selected date (daily view) ---
   const tasksForSelectedDate = useMemo(
     () => tasks.filter((t) => occursOnDate(t, selectedDateStr)),
     [tasks, selectedDateStr]
@@ -186,71 +198,50 @@ const PlannerScreen: React.FC = () => {
   const hasTasksOnDate = (dateStr: string) =>
     tasks.some((t) => occursOnDate(t, dateStr));
 
-  // weekly & monthly aggregations for view mode
-  const tasksForWeek = useMemo(() => {
-    const start = new Date(selectedDate);
-    const day = start.getDay(); // 0..6
-    start.setDate(start.getDate() - day); // start of week (Sunday)
-    const dates: string[] = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      dates.push(ymdFromDate(d));
+  // --- View-mode filtering (day/week/month) ---
+  const tasksForView = useMemo(() => {
+    if (viewMode === 'day') {
+      return tasksForSelectedDate;
     }
-    const unique: Task[] = [];
-    tasks.forEach((task) => {
-      if (dates.some((ds) => occursOnDate(task, ds))) {
-        unique.push(task);
-      }
-    });
-    return unique;
-  }, [tasks, selectedDate]);
 
-  const tasksForMonth = useMemo(() => {
-    const y = currentMonth.getFullYear();
-    const m = currentMonth.getMonth();
-    const dates: string[] = [];
-    for (let i = 1; i <= daysInMonth; i++) {
-      dates.push(
-        `${y}-${String(m + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`
-      );
-    }
-    const unique: Task[] = [];
-    tasks.forEach((task) => {
-      if (dates.some((ds) => occursOnDate(task, ds))) {
-        unique.push(task);
-      }
-    });
-    return unique;
-  }, [tasks, currentMonth, daysInMonth]);
-
-  const tasksToRender = useMemo(() => {
-    switch (viewMode) {
-      case 'week':
-        return tasksForWeek;
-      case 'month':
-        return tasksForMonth;
-      case 'day':
-      default:
-        return tasksForSelectedDate;
-    }
-  }, [viewMode, tasksForSelectedDate, tasksForWeek, tasksForMonth]);
-
-  const tasksHeaderLabel = useMemo(() => {
-    if (viewMode === 'day') return formatDateLabel(selectedDate);
+    const resultMap = new Map<string, Task>();
 
     if (viewMode === 'week') {
-      const start = new Date(selectedDate);
-      const day = start.getDay();
-      start.setDate(start.getDate() - day);
-      const end = new Date(start);
-      end.setDate(start.getDate() + 6);
-      return `${formatShortDate(start)} – ${formatShortDate(end)}`;
+      // week starting Sunday
+      const weekStart = new Date(selectedDate);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // go back to Sunday
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(
+          weekStart.getFullYear(),
+          weekStart.getMonth(),
+          weekStart.getDate() + i
+        );
+        const dStr = formatYMD(d);
+        tasks.forEach((t) => {
+          if (occursOnDate(t, dStr)) {
+            resultMap.set(t.id, t);
+          }
+        });
+      }
+    } else if (viewMode === 'month') {
+      const y = selectedDate.getFullYear();
+      const m = selectedDate.getMonth();
+      const totalDays = new Date(y, m + 1, 0).getDate();
+      for (let day = 1; day <= totalDays; day++) {
+        const d = new Date(y, m, day);
+        const dStr = formatYMD(d);
+        tasks.forEach((t) => {
+          if (occursOnDate(t, dStr)) {
+            resultMap.set(t.id, t);
+          }
+        });
+      }
     }
 
-    // month
-    return monthLabel;
-  }, [viewMode, selectedDate, monthLabel]);
+    return Array.from(resultMap.values()).sort((a, b) =>
+      a.date.localeCompare(b.date)
+    );
+  }, [tasks, tasksForSelectedDate, selectedDate, viewMode]);
 
   // --- Calendar navigation ---
   const changeMonth = (direction: 'prev' | 'next') => {
@@ -266,8 +257,6 @@ const PlannerScreen: React.FC = () => {
     const m = currentMonth.getMonth();
     const d = new Date(y, m, day);
     setSelectedDate(d);
-    // also update taskDate default for new tasks
-    setTaskDate(d);
   };
 
   // --- Task CRUD ---
@@ -275,15 +264,15 @@ const PlannerScreen: React.FC = () => {
     setEditingTask(null);
     setTitle('');
     setType('task');
-    setTaskDate(selectedDate);
     setStartTime('');
     setEndTime('');
     setNotes('');
     setLink('');
-    setAssociatedWith('');
+    setAssociated('');
     setRepeat('none');
-    setReminderMinutesBefore(0);
-    setReminderMode('silent');
+    setFormDate(selectedDate);
+    setAlarmLead(0);
+    setAlarmMode('sound');
     setModalVisible(true);
   };
 
@@ -291,63 +280,110 @@ const PlannerScreen: React.FC = () => {
     setEditingTask(task);
     setTitle(task.title);
     setType(task.type);
-    setTaskDate(toDate(task.date));
     setStartTime(task.startTime || '');
     setEndTime(task.endTime || '');
     setNotes(task.notes || '');
     setLink(task.link || '');
-    setAssociatedWith(task.associatedWith || '');
+    setAssociated(task.associated || '');
     setRepeat(task.repeat);
-    setReminderMinutesBefore(task.reminderMinutesBefore ?? 0);
-    setReminderMode(task.reminderMode ?? 'silent');
+    setFormDate(toDate(task.date));
+    setAlarmLead(task.reminderLeadMinutes ?? 0);
+    setAlarmMode(task.alarmMode ?? 'sound');
     setModalVisible(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!title.trim()) return;
 
-    const baseDateStr = ymdFromDate(taskDate);
-    const now = new Date().toISOString();
+    const nowIso = new Date().toISOString();
+    const baseDateStr = formatYMD(formDate);
 
     if (editingTask) {
       const updated: Task = {
         ...editingTask,
         title: title.trim(),
-        date: baseDateStr,
         type,
+        date: baseDateStr,
         startTime: startTime || undefined,
         endTime: endTime || undefined,
         notes: notes || undefined,
         link: link || undefined,
-        associatedWith: associatedWith || undefined,
+        associated: associated || undefined,
         repeat,
-        reminderMinutesBefore:
-          reminderMinutesBefore > 0 ? reminderMinutesBefore : undefined,
-        reminderMode,
-        updatedAt: now
+        reminderLeadMinutes: alarmLead,
+        alarmMode,
+        updatedAt: nowIso
       };
+
+      // cancel previous reminder if any
+      if (editingTask.notificationId) {
+        await cancelReminderById(editingTask.notificationId);
+        updated.notificationId = null;
+      }
+
+      // schedule new reminder if configured
+      if (alarmLead > 0 && updated.startTime) {
+        const reminderId = await scheduleTaskReminder(
+          {
+            id: updated.id,
+            title: updated.title,
+            date: updated.date,
+            startTime: updated.startTime
+          },
+          {
+            leadMinutes: alarmLead,
+            mode: alarmMode
+          }
+        );
+        updated.notificationId = reminderId;
+      }
+
       const next = tasks.map((t) => (t.id === editingTask.id ? updated : t));
-      saveTasks(next);
+      await saveTasks(next);
     } else {
-      const newTask: Task = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      const newTaskId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      const newTaskBase: Task = {
+        id: newTaskId,
         title: title.trim(),
         date: baseDateStr,
         startTime: startTime || undefined,
         endTime: endTime || undefined,
         notes: notes || undefined,
         link: link || undefined,
-        associatedWith: associatedWith || undefined,
+        associated: associated || undefined,
         isCompleted: false,
         repeat,
         type,
-        reminderMinutesBefore:
-          reminderMinutesBefore > 0 ? reminderMinutesBefore : undefined,
-        reminderMode,
-        createdAt: now,
-        updatedAt: now
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        reminderLeadMinutes: alarmLead,
+        alarmMode,
+        notificationId: null
       };
-      saveTasks([...tasks, newTask]);
+
+      let notificationId: string | null = null;
+      if (alarmLead > 0 && newTaskBase.startTime) {
+        notificationId = await scheduleTaskReminder(
+          {
+            id: newTaskBase.id,
+            title: newTaskBase.title,
+            date: newTaskBase.date,
+            startTime: newTaskBase.startTime
+          },
+          {
+            leadMinutes: alarmLead,
+            mode: alarmMode
+          }
+        );
+      }
+
+      const newTask: Task = {
+        ...newTaskBase,
+        notificationId
+      };
+
+      await saveTasks([...tasks, newTask]);
     }
 
     setModalVisible(false);
@@ -360,25 +396,12 @@ const PlannerScreen: React.FC = () => {
     saveTasks(next);
   };
 
-  const deleteTask = (taskId: string) => {
-    const next = tasks.filter((t) => t.id !== taskId);
+  const deleteTask = async (task: Task) => {
+    if (task.notificationId) {
+      await cancelReminderById(task.notificationId);
+    }
+    const next = tasks.filter((t) => t.id !== task.id);
     saveTasks(next);
-  };
-
-  // --- Picker handlers ---
-  const onDateChange = (e: DateTimePickerEvent, date?: Date) => {
-    setShowDatePicker(false);
-    if (date) setTaskDate(date);
-  };
-
-  const onStartTimeChange = (e: DateTimePickerEvent, date?: Date) => {
-    setShowStartTimePicker(false);
-    if (date) setStartTime(formatTimeFromDate(date));
-  };
-
-  const onEndTimeChange = (e: DateTimePickerEvent, date?: Date) => {
-    setShowEndTimePicker(false);
-    if (date) setEndTime(formatTimeFromDate(date));
   };
 
   return (
@@ -448,25 +471,21 @@ const PlannerScreen: React.FC = () => {
 
             return (
               <TouchableOpacity
-                key={day}
-                style={styles.calendarCell}
+                key={`day-${day}`}
+                style={[
+                  styles.calendarCell,
+                  selected && styles.calendarCellSelected
+                ]}
                 onPress={() => onSelectDay(day)}
               >
-                <View
+                <Text
                   style={[
-                    styles.dayBubble,
-                    selected && styles.dayBubbleSelected
+                    styles.calendarDayText,
+                    selected && styles.calendarDayTextSelected
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.calendarDayText,
-                      selected && styles.calendarDayTextSelected
-                    ]}
-                  >
-                    {day}
-                  </Text>
-                </View>
+                  {day}
+                </Text>
                 {today && !selected && <View style={styles.todayDot} />}
                 {has && (
                   <View
@@ -481,12 +500,45 @@ const PlannerScreen: React.FC = () => {
           })}
         </View>
 
+        {/* View mode chips */}
+        <View style={styles.viewModeRow}>
+          {(['day', 'week', 'month'] as const).map((mode) => (
+            <TouchableOpacity
+              key={mode}
+              style={[
+                styles.viewModeChip,
+                viewMode === mode && styles.viewModeChipSelected
+              ]}
+              onPress={() => setViewMode(mode)}
+            >
+              <Text
+                style={[
+                  styles.viewModeChipText,
+                  viewMode === mode && styles.viewModeChipTextSelected
+                ]}
+              >
+                {mode === 'day'
+                  ? 'Daily'
+                  : mode === 'week'
+                  ? 'Weekly'
+                  : 'Monthly'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         {/* Tasks list */}
         <View style={styles.tasksSection}>
           <View style={styles.tasksHeaderRow}>
             <View>
               <Text style={styles.tasksTitle}>Tasks & events</Text>
-              <Text style={styles.tasksDateLabel}>{tasksHeaderLabel}</Text>
+              <Text style={styles.tasksDateLabel}>
+                {viewMode === 'day'
+                  ? formatDateLabel(selectedDate)
+                  : viewMode === 'week'
+                  ? 'This week'
+                  : 'This month'}
+              </Text>
             </View>
             <TouchableOpacity
               style={styles.addTaskButton}
@@ -497,34 +549,7 @@ const PlannerScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
 
-          {/* View mode chips */}
-          <View style={styles.viewModeRow}>
-            {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
-              <TouchableOpacity
-                key={mode}
-                style={[
-                  styles.viewModeChip,
-                  viewMode === mode && styles.viewModeChipSelected
-                ]}
-                onPress={() => setViewMode(mode)}
-              >
-                <Text
-                  style={[
-                    styles.viewModeChipText,
-                    viewMode === mode && styles.viewModeChipTextSelected
-                  ]}
-                >
-                  {mode === 'day'
-                    ? 'Daily'
-                    : mode === 'week'
-                      ? 'Weekly'
-                      : 'Monthly'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {tasksToRender.length === 0 ? (
+          {tasksForView.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No tasks yet</Text>
               <Text style={styles.emptySubtitle}>
@@ -532,7 +557,7 @@ const PlannerScreen: React.FC = () => {
               </Text>
             </View>
           ) : (
-            tasksToRender.map((task) => (
+            tasksForView.map((task) => (
               <TouchableOpacity
                 key={task.id}
                 style={styles.taskCard}
@@ -560,22 +585,20 @@ const PlannerScreen: React.FC = () => {
                       {task.title}
                     </Text>
                     <View style={styles.taskMetaRow}>
-                      {(task.startTime || task.endTime) && (
-                        <Text style={styles.taskMeta}>
-                          {task.startTime}
-                          {task.endTime ? `–${task.endTime}` : ''}
-                        </Text>
-                      )}
+                      <Text style={styles.taskMeta}>
+                        {task.date}
+                        {task.startTime ? ` · ${task.startTime}` : ''}
+                      </Text>
+                      <Text style={styles.taskMeta}>
+                        {'  · '}{task.type === 'task' ? 'Task' : 'Event'}
+                      </Text>
                       {task.repeat !== 'none' && (
                         <Text style={styles.taskMeta}>
-                          ·{' '}
+                          {'  · '}
                           {task.repeat.charAt(0).toUpperCase() +
                             task.repeat.slice(1)}
                         </Text>
                       )}
-                      <Text style={styles.taskMeta}>
-                        · {task.type === 'task' ? 'Task' : 'Event'}
-                      </Text>
                     </View>
                     {task.notes ? (
                       <Text style={styles.taskNotes} numberOfLines={2}>
@@ -583,20 +606,20 @@ const PlannerScreen: React.FC = () => {
                       </Text>
                     ) : null}
                     {task.link ? (
-                      <Text style={styles.taskNotes} numberOfLines={1}>
+                      <Text style={styles.taskMeta} numberOfLines={1}>
                         🔗 {task.link}
                       </Text>
                     ) : null}
-                    {task.associatedWith ? (
-                      <Text style={styles.taskNotes} numberOfLines={1}>
-                        👥 {task.associatedWith}
+                    {task.associated ? (
+                      <Text style={styles.taskMeta} numberOfLines={1}>
+                        👤 {task.associated}
                       </Text>
                     ) : null}
                   </View>
                 </View>
                 <TouchableOpacity
                   style={styles.deleteButton}
-                  onPress={() => deleteTask(task.id)}
+                  onPress={() => deleteTask(task)}
                 >
                   <Ionicons name="trash-outline" size={18} color="#ef4444" />
                 </TouchableOpacity>
@@ -606,7 +629,7 @@ const PlannerScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      {/* Modal: Add / Edit Task */}
+      {/* Modal */}
       <Modal transparent visible={modalVisible} animationType="slide">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalContent}>
@@ -619,7 +642,6 @@ const PlannerScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            {/* Title */}
             <Text style={styles.modalLabel}>Title</Text>
             <TextInput
               style={styles.input}
@@ -629,13 +651,15 @@ const PlannerScreen: React.FC = () => {
               placeholderTextColor={theme.colors.textSecondary}
             />
 
-            {/* Type */}
             <Text style={styles.modalLabel}>Type</Text>
             <View style={styles.chipRow}>
               {(['task', 'event'] as TaskType[]).map((t) => (
                 <TouchableOpacity
                   key={t}
-                  style={[styles.chip, type === t && styles.chipSelected]}
+                  style={[
+                    styles.chip,
+                    type === t && styles.chipSelected
+                  ]}
                   onPress={() => setType(t)}
                 >
                   <Text
@@ -650,55 +674,38 @@ const PlannerScreen: React.FC = () => {
               ))}
             </View>
 
-            {/* Date */}
+            {/* Date & Time */}
             <Text style={styles.modalLabel}>Date</Text>
             <TouchableOpacity
-              style={styles.inputButton}
+              style={styles.inputLikeButton}
               onPress={() => setShowDatePicker(true)}
             >
-              <Text style={styles.inputButtonText}>
-                {formatShortDate(taskDate)}
+              <Text style={styles.inputLikeButtonText}>
+                {formatShortDate(formDate)}
               </Text>
-              <Ionicons
-                name="calendar-outline"
-                size={18}
-                color={theme.colors.textSecondary}
-              />
             </TouchableOpacity>
 
-            {/* Start / End time */}
             <View style={styles.row}>
-              <View style={[styles.rowItem, { marginRight: 8 }]}>
+              <View style={styles.rowItem}>
                 <Text style={styles.modalLabel}>Start time</Text>
                 <TouchableOpacity
-                  style={styles.inputButton}
-                  onPress={() => setShowStartTimePicker(true)}
+                  style={styles.inputLikeButton}
+                  onPress={() => setShowTimePicker(true)}
                 >
-                  <Text style={styles.inputButtonText}>
+                  <Text style={styles.inputLikeButtonText}>
                     {startTime || 'Select time'}
                   </Text>
-                  <Ionicons
-                    name="time-outline"
-                    size={18}
-                    color={theme.colors.textSecondary}
-                  />
                 </TouchableOpacity>
               </View>
-              <View style={[styles.rowItem, { marginLeft: 8 }]}>
+              <View style={styles.rowItem}>
                 <Text style={styles.modalLabel}>End time</Text>
-                <TouchableOpacity
-                  style={styles.inputButton}
-                  onPress={() => setShowEndTimePicker(true)}
-                >
-                  <Text style={styles.inputButtonText}>
-                    {endTime || 'Select time'}
-                  </Text>
-                  <Ionicons
-                    name="time-outline"
-                    size={18}
-                    color={theme.colors.textSecondary}
-                  />
-                </TouchableOpacity>
+                <TextInput
+                  style={styles.input}
+                  value={endTime}
+                  onChangeText={setEndTime}
+                  placeholder="10:30"
+                  placeholderTextColor={theme.colors.textSecondary}
+                />
               </View>
             </View>
 
@@ -709,7 +716,10 @@ const PlannerScreen: React.FC = () => {
                 (r) => (
                   <TouchableOpacity
                     key={r}
-                    style={[styles.chip, repeat === r && styles.chipSelected]}
+                    style={[
+                      styles.chip,
+                      repeat === r && styles.chipSelected
+                    ]}
                     onPress={() => setRepeat(r)}
                   >
                     <Text
@@ -727,56 +737,60 @@ const PlannerScreen: React.FC = () => {
               )}
             </View>
 
-            {/* Reminder */}
+            {/* Reminder lead time */}
             <Text style={styles.modalLabel}>Reminder</Text>
             <View style={styles.chipRow}>
-              {[0, 5, 30].map((min) => (
+              {[0, 5, 30].map((m) => (
                 <TouchableOpacity
-                  key={min}
+                  key={m}
                   style={[
                     styles.chip,
-                    reminderMinutesBefore === min && styles.chipSelected
+                    alarmLead === (m as AlarmLeadMinutes) && styles.chipSelected
                   ]}
-                  onPress={() => setReminderMinutesBefore(min)}
+                  onPress={() => setAlarmLead(m as AlarmLeadMinutes)}
                 >
                   <Text
                     style={[
                       styles.chipText,
-                      reminderMinutesBefore === min && styles.chipTextSelected
+                      alarmLead === (m as AlarmLeadMinutes) &&
+                        styles.chipTextSelected
                     ]}
                   >
-                    {min === 0 ? 'No reminder' : `${min} min before`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={styles.chipRow}>
-              {(['silent', 'vibrate', 'tone'] as ReminderMode[]).map((mode) => (
-                <TouchableOpacity
-                  key={mode}
-                  style={[
-                    styles.chip,
-                    reminderMode === mode && styles.chipSelected
-                  ]}
-                  onPress={() => setReminderMode(mode)}
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      reminderMode === mode && styles.chipTextSelected
-                    ]}
-                  >
-                    {mode === 'silent'
-                      ? 'Silent'
-                      : mode === 'vibrate'
-                        ? 'Vibrate'
-                        : 'Tone'}
+                    {m === 0 ? 'None' : `${m} min before`}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Description / Link / Associated */}
+            {/* Alarm mode */}
+            <Text style={styles.modalLabel}>Alarm mode</Text>
+            <View style={styles.chipRow}>
+              {(['silent', 'vibrate', 'sound'] as AlarmMode[]).map((mode) => (
+                <TouchableOpacity
+                  key={mode}
+                  style={[
+                    styles.chip,
+                    alarmMode === mode && styles.chipSelected
+                  ]}
+                  onPress={() => setAlarmMode(mode)}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      alarmMode === mode && styles.chipTextSelected
+                    ]}
+                  >
+                    {mode === 'silent'
+                      ? 'Silent'
+                      : mode === 'vibrate'
+                      ? 'Vibrate'
+                      : 'Sound'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Description, link, associated */}
             <Text style={styles.modalLabel}>Description</Text>
             <TextInput
               style={[styles.input, styles.notesInput]}
@@ -796,12 +810,12 @@ const PlannerScreen: React.FC = () => {
               placeholderTextColor={theme.colors.textSecondary}
             />
 
-            <Text style={styles.modalLabel}>Associated with</Text>
+            <Text style={styles.modalLabel}>Associated (person / project)</Text>
             <TextInput
               style={styles.input}
-              value={associatedWith}
-              onChangeText={setAssociatedWith}
-              placeholder="Person, project, client..."
+              value={associated}
+              onChangeText={setAssociated}
+              placeholder="e.g. Client name, project name"
               placeholderTextColor={theme.colors.textSecondary}
             />
 
@@ -823,33 +837,40 @@ const PlannerScreen: React.FC = () => {
             </View>
           </View>
         </View>
-      </Modal>
 
-      {/* Native pickers */}
-      {showDatePicker && (
-        <DateTimePicker
-          value={taskDate}
-          mode="date"
-          display="default"
-          onChange={onDateChange}
-        />
-      )}
-      {showStartTimePicker && (
-        <DateTimePicker
-          value={new Date()}
-          mode="time"
-          display="default"
-          onChange={onStartTimeChange}
-        />
-      )}
-      {showEndTimePicker && (
-        <DateTimePicker
-          value={new Date()}
-          mode="time"
-          display="default"
-          onChange={onEndTimeChange}
-        />
-      )}
+        {/* Date picker */}
+        {showDatePicker && (
+          <DateTimePicker
+            value={formDate}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={(event: any, date?: Date) => {
+              setShowDatePicker(false);
+              if (date) {
+                setFormDate(date);
+              }
+            }}
+          />
+        )}
+
+        {/* Time picker */}
+        {showTimePicker && (
+          <DateTimePicker
+            value={formDate}
+            mode="time"
+            is24Hour
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={(event: any, date?: Date) => {
+              setShowTimePicker(false);
+              if (date) {
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                setStartTime(`${hours}:${minutes}`);
+              }
+            }}
+          />
+        )}
+      </Modal>
     </View>
   );
 };
@@ -857,7 +878,6 @@ const PlannerScreen: React.FC = () => {
 export default PlannerScreen;
 
 const styles = StyleSheet.create({
-  // full-screen container with nice padding from top
   screen: {
     flex: 1,
     backgroundColor: theme.colors.background
@@ -867,10 +887,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: theme.spacing(2),
-    paddingTop: theme.spacing(8), // TOP PADDING FIXED HERE
+    paddingTop: theme.spacing(14), // nice distance from top like Home
     paddingBottom: theme.spacing(4)
   },
-
   header: {
     marginBottom: theme.spacing(2)
   },
@@ -884,7 +903,6 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     marginTop: 2
   },
-
   monthRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -905,7 +923,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center'
   },
-
   weekDaysRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -917,7 +934,6 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.xs,
     color: theme.colors.textSecondary
   },
-
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -925,21 +941,14 @@ const styles = StyleSheet.create({
   },
   calendarCell: {
     width: `${100 / 7}%`,
-    height: 40, // fixed height instead of aspectRatio -> fixes any clipping
+    aspectRatio: 1.1,
     alignItems: 'center',
     justifyContent: 'center',
     marginVertical: 2
   },
-  dayBubble: {
-    minWidth: 30,
-    paddingVertical: 4,
-    paddingHorizontal: 6,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  dayBubbleSelected: {
-    backgroundColor: '#E0ECFF'
+  calendarCellSelected: {
+    backgroundColor: '#E0ECFF',
+    borderRadius: 999
   },
   calendarDayText: {
     fontSize: theme.fontSize.sm,
@@ -966,7 +975,30 @@ const styles = StyleSheet.create({
   taskDotSelected: {
     backgroundColor: theme.colors.primaryDark
   },
-
+  viewModeRow: {
+    flexDirection: 'row',
+    marginBottom: theme.spacing(1)
+  },
+  viewModeChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    marginRight: 8
+  },
+  viewModeChipSelected: {
+    backgroundColor: '#E0ECFF',
+    borderColor: theme.colors.primary
+  },
+  viewModeChipText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.textSecondary
+  },
+  viewModeChipTextSelected: {
+    color: theme.colors.primary,
+    fontWeight: '600'
+  },
   tasksSection: {
     marginTop: theme.spacing(1)
   },
@@ -999,32 +1031,6 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.xs,
     fontWeight: '600'
   },
-
-  viewModeRow: {
-    flexDirection: 'row',
-    marginBottom: theme.spacing(1)
-  },
-  viewModeChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    marginRight: 6
-  },
-  viewModeChipSelected: {
-    backgroundColor: '#E0ECFF',
-    borderColor: theme.colors.primary
-  },
-  viewModeChipText: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.textSecondary
-  },
-  viewModeChipTextSelected: {
-    color: theme.colors.primary,
-    fontWeight: '600'
-  },
-
   emptyState: {
     marginTop: theme.spacing(2),
     padding: theme.spacing(2),
@@ -1043,7 +1049,6 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     marginTop: 2
   },
-
   taskCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1102,7 +1107,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 2
   },
-
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15,23,42,0.4)',
@@ -1147,24 +1151,6 @@ const styles = StyleSheet.create({
     minHeight: 70,
     textAlignVertical: 'top'
   },
-
-  inputButton: {
-    marginTop: 4,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: theme.colors.background
-  },
-  inputButtonText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.text
-  },
-
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1191,16 +1177,26 @@ const styles = StyleSheet.create({
     color: theme.colors.primary,
     fontWeight: '600'
   },
-
   row: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: theme.spacing(1)
+    justifyContent: 'space-between'
   },
   rowItem: {
     flex: 1
   },
-
+  inputLikeButton: {
+    marginTop: 4,
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    justifyContent: 'center'
+  },
+  inputLikeButtonText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.text
+  },
   modalButtonsRow: {
     flexDirection: 'row',
     marginTop: theme.spacing(2)
