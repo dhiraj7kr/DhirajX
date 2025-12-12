@@ -1,5 +1,6 @@
 import { Feather, FontAwesome, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Location from 'expo-location'; // <--- ADDED IMPORT
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -36,6 +37,27 @@ const QUOTES = [
   }
 ];
 
+// ---------- WEATHER UTILS ----------
+// Maps WMO codes from Open-Meteo to readable text & icons
+const getWeatherInfo = (wmoCode: number) => {
+  // Clear
+  if (wmoCode === 0) return { label: 'Clear Sky', icon: 'sunny' as const, color: '#FDB813' };
+  // Cloudy
+  if ([1, 2, 3].includes(wmoCode)) return { label: 'Partly Cloudy', icon: 'partly-sunny' as const, color: '#FDBA74' };
+  // Fog
+  if ([45, 48].includes(wmoCode)) return { label: 'Foggy', icon: 'cloud' as const, color: '#9CA3AF' };
+  // Drizzle
+  if ([51, 53, 55].includes(wmoCode)) return { label: 'Drizzle', icon: 'rainy' as const, color: '#60A5FA' };
+  // Rain
+  if ([61, 63, 65, 80, 81, 82].includes(wmoCode)) return { label: 'Rain', icon: 'rainy' as const, color: '#3B82F6' };
+  // Snow
+  if ([71, 73, 75, 77, 85, 86].includes(wmoCode)) return { label: 'Snow', icon: 'snow' as const, color: '#93C5FD' };
+  // Thunderstorm
+  if ([95, 96, 99].includes(wmoCode)) return { label: 'Thunderstorm', icon: 'thunderstorm' as const, color: '#7C3AED' };
+  
+  return { label: 'Unknown', icon: 'cloud-outline' as const, color: '#9CA3AF' };
+};
+
 const HomeScreen: React.FC = () => {
   const { data, pickProfileImage, updateProfile } = useAppData();
   const { profile } = data;
@@ -51,30 +73,82 @@ const HomeScreen: React.FC = () => {
   // date/time
   const [now, setNow] = useState(new Date());
 
+  // Weather State
+  const [weather, setWeather] = useState({
+    condition: 'Loading...',
+    temperature: '--',
+    city: profile.location || 'Locating...',
+    icon: 'partly-sunny' as keyof typeof Ionicons.glyphMap,
+    iconColor: '#FDBA74'
+  });
+
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 60 * 1000); // update every minute
+    // Update time every second for accurate AM/PM flip
+    const id = setInterval(() => setNow(new Date()), 1000); 
     return () => clearInterval(id);
   }, []);
 
-  const dayName = now.toLocaleDateString(undefined, { weekday: 'long' });
-  const dateStr = now.toLocaleDateString(undefined, {
+  // Fetch Weather & Location on Mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          setWeather(prev => ({ ...prev, city: 'Permission Denied', condition: 'N/A' }));
+          return;
+        }
+
+        const location = await Location.getCurrentPositionAsync({});
+        const { latitude, longitude } = location.coords;
+
+        // 1. Get City Name (Reverse Geocode)
+        const geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
+        let cityName = profile.location; // Default fallback
+        if (geocode.length > 0) {
+          // Prefer city, then subregion, then region
+          cityName = geocode[0].city || geocode[0].subregion || geocode[0].region || profile.location;
+        }
+
+        // 2. Fetch Weather (Open-Meteo API)
+        const response = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`
+        );
+        const data = await response.json();
+        
+        if (data.current_weather) {
+          const { temperature, weathercode } = data.current_weather;
+          const info = getWeatherInfo(weathercode);
+
+          setWeather({
+            condition: info.label,
+            temperature: `${Math.round(temperature)}°C`,
+            city: cityName || 'Unknown Location',
+            icon: info.icon,
+            iconColor: info.color
+          });
+        }
+      } catch (error) {
+        console.warn('Error fetching weather:', error);
+        setWeather(prev => ({ ...prev, condition: 'Unavailable', city: profile.location }));
+      }
+    })();
+  }, []); // Run once on mount
+
+  const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
+  const dateStr = now.toLocaleDateString('en-US', {
     day: 'numeric',
     month: 'long',
     year: 'numeric'
   });
-  const timeStr = now.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit'
+  
+  // FIXED: Explicitly use 12-hour format with AM/PM
+  const timeStr = now.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
   });
 
-  // simple demo weather (you can later replace with real API)
-  const weather = {
-    condition: 'Partly Cloudy',
-    temperature: '27°C',
-    city: profile.location || 'Your City'
-  };
-
-  // small looping animation for the cloud
+  // small looping animation for the cloud (retained)
   const cloudAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -291,7 +365,7 @@ const HomeScreen: React.FC = () => {
             >
               <View style={styles.infoCardHeader}>
                 <Ionicons
-                  name="partly-sunny-outline"
+                  name="navigate-outline" // Changed icon to indicate location focus
                   size={20}
                   color={theme.colors.primary}
                 />
@@ -299,23 +373,31 @@ const HomeScreen: React.FC = () => {
               </View>
 
               <View style={styles.weatherRow}>
-                <View>
+                <View style={{ flex: 1 }}>
                   <Text style={styles.temperature}>{weather.temperature}</Text>
                   <Text style={styles.weatherCondition}>
                     {weather.condition}
                   </Text>
-                  <Text style={styles.cityText}>{weather.city}</Text>
+                  <Text style={styles.cityText} numberOfLines={1}>
+                    {weather.city}
+                  </Text>
                 </View>
 
                 <View style={styles.weatherIconArea}>
-                  <Ionicons name="sunny" size={30} color="#FDBA74" />
+                  {/* Dynamic Weather Icon based on API */}
+                  <Ionicons name={weather.icon} size={36} color={weather.iconColor} />
+                  
+                  {/* Kept your animation for visual flair */}
                   <Animated.View
                     style={[
                       styles.cloudIconWrapper,
                       { transform: [{ translateX: cloudTranslateX }] }
                     ]}
                   >
-                    <Ionicons name="cloud" size={30} color="#9CA3AF" />
+                   {/* Only show the small animated cloud if it's not already very cloudy/rainy to avoid clutter */}
+                   {['sunny', 'partly-sunny'].includes(weather.icon) && (
+                      <Ionicons name="cloud" size={20} color="#9CA3AF" style={{ opacity: 0.6 }} />
+                   )}
                   </Animated.View>
                 </View>
               </View>
@@ -587,7 +669,8 @@ const styles = StyleSheet.create({
   },
   cityText: {
     color: theme.colors.textSecondary,
-    fontSize: theme.fontSize.xs
+    fontSize: theme.fontSize.xs,
+    marginTop: 2
   },
   weatherIconArea: {
     width: 60,
@@ -597,7 +680,8 @@ const styles = StyleSheet.create({
   },
   cloudIconWrapper: {
     position: 'absolute',
-    bottom: 0
+    bottom: -5,
+    right: -5
   },
 
   bottomQuoteWrapper: {
