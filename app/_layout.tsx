@@ -1,7 +1,8 @@
+// app/_layout.tsx
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import TaskAlarmHandler from '../src/components/TaskAlarmHandler';
 import { AppDataProvider, useAppData } from '../src/context/AppDataContext';
 import { theme } from '../src/theme/theme';
@@ -19,48 +20,83 @@ function InnerLayout() {
 
   return (
     <Tabs
-      screenOptions={({ route }) => ({
+      screenOptions={{
         headerShown: false,
         tabBarStyle: {
           backgroundColor: theme.colors.card,
-          borderTopColor: theme.colors.border
+          borderTopColor: theme.colors.border,
+          height: 60, // Taller bar for better touch targets
+          paddingBottom: 8,
+          paddingTop: 8
         },
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.textSecondary,
-        tabBarLabel: ({ focused, color }) => (
-          <Text
-            style={{
-              color,
-              fontSize: theme.fontSize.xs,
-              fontWeight: focused ? '600' : '400'
-            }}
-          >
-            {route.name === 'index'
-              ? 'Home'
-              : route.name.charAt(0).toUpperCase() + route.name.slice(1)}
-          </Text>
-        ),
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName: keyof typeof Ionicons.glyphMap = 'home-outline';
-
-          if (route.name === 'index') {
-            iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'projects') {
-            iconName = focused ? 'briefcase' : 'briefcase-outline';
-          } else if (route.name === 'about') {
-            iconName = focused ? 'person' : 'person-outline';
-          } else if (route.name === 'contact') {
-            iconName = focused ? 'chatbubble' : 'chatbubble-outline';
-          }
-
-          return <Ionicons name={iconName} size={size} color={color} />;
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '600',
+          marginTop: 2
         }
-      })}
+      }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Home' }} />
-      <Tabs.Screen name="projects" options={{ title: 'Projects' }} />
-      <Tabs.Screen name="about" options={{ title: 'About' }} />
-      <Tabs.Screen name="contact" options={{ title: 'Contact' }} />
+      {/* 1. Home */}
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
+          )
+        }}
+      />
+
+      {/* 2. Planner (FIXED: Name changed from 'PlannerScreen' to 'planner' to match file) */}
+      <Tabs.Screen
+        name="planner"
+        options={{
+          title: 'Planner',
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons name={focused ? 'calendar' : 'calendar-outline'} size={24} color={color} />
+          )
+        }}
+      />
+
+      {/* 3. Notes */}
+      <Tabs.Screen
+        name="notes"
+        options={{
+          title: 'Notes',
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons name={focused ? 'document-text' : 'document-text-outline'} size={24} color={color} />
+          )
+        }}
+      />
+
+      {/* 4. Expenses */}
+      <Tabs.Screen
+        name="expenses"
+        options={{
+          title: 'Expenses',
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons name={focused ? 'wallet' : 'wallet-outline'} size={24} color={color} />
+          )
+        }}
+      />
+
+      {/* 5. Portfolio (Profile) */}
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ focused, color }) => (
+            <Ionicons name={focused ? 'person-circle' : 'person-circle-outline'} size={24} color={color} />
+          )
+        }}
+      />
+
+      {/* --- HIDDEN TABS (Routes that exist but shouldn't show in the bottom bar) --- */}
+      <Tabs.Screen name="projects" options={{ href: null }} />
+      <Tabs.Screen name="about" options={{ href: null }} />
+      <Tabs.Screen name="contact" options={{ href: null }} />
     </Tabs>
   );
 }

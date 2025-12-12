@@ -1,6 +1,6 @@
 import { Feather, FontAwesome, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Location from 'expo-location'; // <--- ADDED IMPORT
+import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -38,21 +38,13 @@ const QUOTES = [
 ];
 
 // ---------- WEATHER UTILS ----------
-// Maps WMO codes from Open-Meteo to readable text & icons
 const getWeatherInfo = (wmoCode: number) => {
-  // Clear
   if (wmoCode === 0) return { label: 'Clear Sky', icon: 'sunny' as const, color: '#FDB813' };
-  // Cloudy
   if ([1, 2, 3].includes(wmoCode)) return { label: 'Partly Cloudy', icon: 'partly-sunny' as const, color: '#FDBA74' };
-  // Fog
   if ([45, 48].includes(wmoCode)) return { label: 'Foggy', icon: 'cloud' as const, color: '#9CA3AF' };
-  // Drizzle
   if ([51, 53, 55].includes(wmoCode)) return { label: 'Drizzle', icon: 'rainy' as const, color: '#60A5FA' };
-  // Rain
   if ([61, 63, 65, 80, 81, 82].includes(wmoCode)) return { label: 'Rain', icon: 'rainy' as const, color: '#3B82F6' };
-  // Snow
   if ([71, 73, 75, 77, 85, 86].includes(wmoCode)) return { label: 'Snow', icon: 'snow' as const, color: '#93C5FD' };
-  // Thunderstorm
   if ([95, 96, 99].includes(wmoCode)) return { label: 'Thunderstorm', icon: 'thunderstorm' as const, color: '#7C3AED' };
   
   return { label: 'Unknown', icon: 'cloud-outline' as const, color: '#9CA3AF' };
@@ -83,7 +75,6 @@ const HomeScreen: React.FC = () => {
   });
 
   useEffect(() => {
-    // Update time every second for accurate AM/PM flip
     const id = setInterval(() => setNow(new Date()), 1000); 
     return () => clearInterval(id);
   }, []);
@@ -101,15 +92,12 @@ const HomeScreen: React.FC = () => {
         const location = await Location.getCurrentPositionAsync({});
         const { latitude, longitude } = location.coords;
 
-        // 1. Get City Name (Reverse Geocode)
         const geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
-        let cityName = profile.location; // Default fallback
+        let cityName = profile.location;
         if (geocode.length > 0) {
-          // Prefer city, then subregion, then region
           cityName = geocode[0].city || geocode[0].subregion || geocode[0].region || profile.location;
         }
 
-        // 2. Fetch Weather (Open-Meteo API)
         const response = await fetch(
           `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`
         );
@@ -132,7 +120,7 @@ const HomeScreen: React.FC = () => {
         setWeather(prev => ({ ...prev, condition: 'Unavailable', city: profile.location }));
       }
     })();
-  }, []); // Run once on mount
+  }, []);
 
   const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
   const dateStr = now.toLocaleDateString('en-US', {
@@ -141,14 +129,12 @@ const HomeScreen: React.FC = () => {
     year: 'numeric'
   });
   
-  // FIXED: Explicitly use 12-hour format with AM/PM
   const timeStr = now.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true
   });
 
-  // small looping animation for the cloud (retained)
   const cloudAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -325,12 +311,21 @@ const HomeScreen: React.FC = () => {
           {/* Header row with "View planner" */}
           <View style={styles.headerRow}>
             <SectionHeader title="Today at a glance" />
+            
+            {/* --- FIX: NAVIGATION & ICON --- */}
             <TouchableOpacity
               onPress={() => router.push('/planner')}
               style={styles.viewPlannerButton}
             >
+              <Ionicons 
+                name="calendar" 
+                size={14} 
+                color={theme.colors.primary} 
+                style={{ marginRight: 4 }} 
+              />
               <Text style={styles.viewPlannerText}>View planner →</Text>
             </TouchableOpacity>
+            {/* ---------------------------------- */}
           </View>
 
           <View style={styles.infoRow}>
@@ -365,7 +360,7 @@ const HomeScreen: React.FC = () => {
             >
               <View style={styles.infoCardHeader}>
                 <Ionicons
-                  name="navigate-outline" // Changed icon to indicate location focus
+                  name="navigate-outline"
                   size={20}
                   color={theme.colors.primary}
                 />
@@ -394,10 +389,9 @@ const HomeScreen: React.FC = () => {
                       { transform: [{ translateX: cloudTranslateX }] }
                     ]}
                   >
-                   {/* Only show the small animated cloud if it's not already very cloudy/rainy to avoid clutter */}
-                   {['sunny', 'partly-sunny'].includes(weather.icon) && (
+                    {['sunny', 'partly-sunny'].includes(weather.icon) && (
                       <Ionicons name="cloud" size={20} color="#9CA3AF" style={{ opacity: 0.6 }} />
-                   )}
+                    )}
                   </Animated.View>
                 </View>
               </View>
@@ -586,8 +580,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between'
   },
+  
+  // --- UPDATED BUTTON STYLE ---
   viewPlannerButton: {
-    paddingHorizontal: 10,
+    flexDirection: 'row', // Align icon and text
+    alignItems: 'center',
+    paddingHorizontal: 12, // Increased padding
     paddingVertical: 6,
     borderRadius: 999,
     backgroundColor: '#E0ECFF'
