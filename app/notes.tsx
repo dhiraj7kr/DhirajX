@@ -108,13 +108,18 @@ const loadFromJSON = async (): Promise<AppDataStore> => {
 };
 
 // ==========================================
-// 3. MAIN COMPONENT
+// 3. MAIN COMPONENT (Parent Holder)
 // ==========================================
 
 export default function NotesScreen() {
   const [activeTab, setActiveTab] = useState<'notes' | 'readLater' | 'voice'>('notes');
   const [data, setData] = useState<AppDataStore>({ notes: [], links: [], voiceNotes: [] });
   const [loading, setLoading] = useState(true);
+
+  // --- LIFTED STATE FOR RECORDING ---
+  // We keep recording state here so it survives tab switching
+  const [activeRecording, setActiveRecording] = useState<Audio.Recording | null>(null);
+  const [recordingTimer, setRecordingTimer] = useState(0);
 
   useEffect(() => {
     loadFromJSON().then((loadedData) => {
@@ -126,6 +131,87 @@ export default function NotesScreen() {
   useEffect(() => {
     if (!loading) saveToJSON(data);
   }, [data, loading]);
+
+  // --- GLOBAL RECORDING FUNCTIONS ---
+
+  const startGlobalRecording = async () => {
+    try {
+      const perm = await Audio.requestPermissionsAsync();
+      if (perm.status !== 'granted') {
+        Alert.alert('Permission needed', 'Microphone access is required to record.');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
+      const recordingOptions: Audio.RecordingOptions = {
+        android: {
+          extension: '.m4a',
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+        } as any,
+        ios: {
+          extension: '.m4a',
+          audioQuality: Audio.IOSAudioQuality.HIGH,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {
+          mimeType: 'audio/webm',
+          bitsPerSecond: 128000,
+        },
+      };
+
+      const { recording } = await Audio.Recording.createAsync(recordingOptions);
+
+      recording.setOnRecordingStatusUpdate((status) => {
+        if (status.isRecording) {
+          setRecordingTimer(Math.floor(status.durationMillis / 1000));
+        }
+      });
+
+      await recording.setProgressUpdateInterval(1000);
+      setActiveRecording(recording);
+
+    } catch (e) {
+      console.error('Recording failed', e);
+      Alert.alert('Error', 'Failed to start recording');
+    }
+  };
+
+  const stopGlobalRecording = async (): Promise<string | null> => {
+    if (!activeRecording) return null;
+
+    try {
+      await activeRecording.stopAndUnloadAsync();
+      const uri = activeRecording.getURI();
+
+      // Cleanup
+      activeRecording.setOnRecordingStatusUpdate(null);
+      setActiveRecording(null);
+      return uri;
+    } catch (e) {
+      console.error('Failed to stop recording', e);
+      return null;
+    }
+  };
+
+  const resetTimer = () => setRecordingTimer(0);
+
+  // --- DATA UPDATERS ---
 
   const updateNotes = (newNotes: Note[]) => {
     setData(prev => ({ ...prev, notes: newNotes }));
@@ -154,13 +240,32 @@ export default function NotesScreen() {
       <View style={styles.tabBar}>
         <TabButton title="Notes" icon="document-text-outline" active={activeTab === 'notes'} onPress={() => setActiveTab('notes')} />
         <TabButton title="Read Later" icon="bookmarks-outline" active={activeTab === 'readLater'} onPress={() => setActiveTab('readLater')} />
-        <TabButton title="Voice" icon="mic-outline" active={activeTab === 'voice'} onPress={() => setActiveTab('voice')} />
+        
+        {/* Visual indicator on tab if recording is active in background */}
+        <TabButton 
+          title={activeRecording ? "Recording..." : "Voice"} 
+          icon={activeRecording ? "mic" : "mic-outline"} 
+          active={activeTab === 'voice'} 
+          onPress={() => setActiveTab('voice')}
+          extraStyle={activeRecording ? { borderColor: theme.colors.danger, borderWidth: 1 } : {}}
+          textStyle={activeRecording ? { color: theme.colors.danger } : {}} 
+        />
       </View>
 
       <View style={styles.content}>
         {activeTab === 'notes' && <NotesTab notes={data.notes} setNotes={updateNotes} />}
         {activeTab === 'readLater' && <ReadLaterTab links={data.links} setLinks={updateLinks} />}
-        {activeTab === 'voice' && <VoiceTab voiceNotes={data.voiceNotes} setVoiceNotes={updateVoiceNotes} />}
+        {activeTab === 'voice' && (
+          <VoiceTab 
+            voiceNotes={data.voiceNotes} 
+            setVoiceNotes={updateVoiceNotes}
+            activeRecording={activeRecording}
+            activeTimer={recordingTimer}
+            onStartRecording={startGlobalRecording}
+            onStopRecording={stopGlobalRecording}
+            onResetTimer={resetTimer}
+          />
+        )}
       </View>
     </SafeAreaView>
   );
@@ -473,12 +578,29 @@ const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: Li
 };
 
 // ==========================================
-// 6. TAB 3: VOICE NOTES (UPDATED: FOREGROUND SERVICE FIX)
+// 6. TAB 3: VOICE NOTES (UPDATED WITH SHARE)
 // ==========================================
 
-const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setVoiceNotes: (v: VoiceNote[]) => void }) => {
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [timer, setTimer] = useState(0);
+interface VoiceTabProps {
+  voiceNotes: VoiceNote[];
+  setVoiceNotes: (v: VoiceNote[]) => void;
+  activeRecording: Audio.Recording | null;
+  activeTimer: number;
+  onStartRecording: () => void;
+  onStopRecording: () => Promise<string | null>;
+  onResetTimer: () => void;
+}
+
+const VoiceTab = ({ 
+  voiceNotes, 
+  setVoiceNotes, 
+  activeRecording, 
+  activeTimer, 
+  onStartRecording, 
+  onStopRecording, 
+  onResetTimer 
+}: VoiceTabProps) => {
+
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [isLooping, setIsLooping] = useState(false);
@@ -505,13 +627,20 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
 
   const appState = useRef(AppState.currentState);
 
-  // 1. RE-SYNC ANIMATION ON APP FOREGROUND
+  // 1. RE-SYNC ANIMATION ON APP FOREGROUND / TAB SWITCH
+  useEffect(() => {
+    if (activeRecording) {
+      startPulseAnimation();
+    } else {
+      recordingAnim.setValue(1);
+    }
+  }, [activeRecording]);
+
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        if (recording) {
+        if (activeRecording) {
               startPulseAnimation();
-              // Native OnRecordingStatusUpdate will automatically sync the timer
         }
       }
       appState.current = nextAppState;
@@ -520,10 +649,11 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
     return () => {
       subscription.remove();
     };
-  }, [recording]);
+  }, [activeRecording]);
 
   // 2. ANIMATION LOGIC
   const startPulseAnimation = () => {
+    recordingAnim.setValue(1);
     Animated.loop(
         Animated.sequence([
           Animated.timing(recordingAnim, { toValue: 1.2, duration: 800, useNativeDriver: true }),
@@ -531,14 +661,6 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
         ])
     ).start();
   };
-
-  useEffect(() => {
-    if (recording) {
-      startPulseAnimation();
-    } else {
-      recordingAnim.setValue(1);
-    }
-  }, [recording]);
 
   useEffect(() => {
     if (playingId) {
@@ -559,89 +681,21 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
     };
   }, []);
 
-  // 3. START RECORDING (UPDATED WITH FOREGROUND SERVICE)
-  const startRecording = async () => {
-    try {
-      const perm = await Audio.requestPermissionsAsync();
-      if (perm.status !== 'granted') return;
-
-      // REQUIRED: Enable background + foreground service
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-
-      const recordingOptions: Audio.RecordingOptions = {
-        android: {
-          extension: '.m4a',
-          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-          audioEncoder: Audio.AndroidAudioEncoder.AAC,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-        } as any,
-        ios: {
-          extension: '.m4a',
-          audioQuality: Audio.IOSAudioQuality.HIGH,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-        web: {
-          mimeType: 'audio/webm',
-          bitsPerSecond: 128000,
-        },
-      };
-
-      const { recording } = await Audio.Recording.createAsync(recordingOptions);
-
-      // Native status sync
-      recording.setOnRecordingStatusUpdate((status) => {
-        if (status.isRecording) {
-          setTimer(Math.floor(status.durationMillis / 1000));
-        }
-      });
-
-      await recording.setProgressUpdateInterval(1000);
-      setRecording(recording);
-
-    } catch (e) {
-      console.error('Recording failed', e);
-    }
-  };
-
-  const stopRecording = async () => {
-    if(!recording) return;
-    
-    try {
-        await recording.stopAndUnloadAsync();
-        const uri = recording.getURI();
-        
-        // Remove listener
-        recording.setOnRecordingStatusUpdate(null);
-        setRecording(null);
-        
-        if (uri) {
-          setTempUri(uri);
-          setSaveName(`Voice Memo ${voiceNotes.length + 1}`);
-          setSaveLocked(false);
-          setSavePin('');
-          setSaveModalVisible(true);
-        }
-    } catch (e) {
-        console.error('Failed to stop recording', e);
+  // 3. STOP HANDLER (Uses Parent Logic)
+  const handleStopRecording = async () => {
+    const uri = await onStopRecording();
+    if (uri) {
+        setTempUri(uri);
+        setSaveName(`Voice Memo ${voiceNotes.length + 1}`);
+        setSaveLocked(false);
+        setSavePin('');
+        setSaveModalVisible(true);
     }
   };
 
   const cancelSave = () => {
     setSaveModalVisible(false);
-    setTimer(0);
+    onResetTimer(); 
   };
 
   const finalizeSave = () => {
@@ -655,14 +709,14 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
         uri: tempUri,
         name: saveName || `Recording ${Date.now()}`,
         createdAt: new Date().toISOString(),
-        durationSeconds: timer,
+        durationSeconds: activeTimer,
         isLocked: saveLocked,
         password: saveLocked ? savePin : undefined
       };
       setVoiceNotes([note, ...voiceNotes]);
     }
     setSaveModalVisible(false);
-    setTimer(0);
+    onResetTimer(); 
   };
 
   const handlePlayPress = (item: VoiceNote) => {
@@ -732,28 +786,41 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
     }
   };
 
+  // --- NEW SHARE FUNCTION ---
+  const shareAudio = async (item: VoiceNote) => {
+    try {
+        if (!(await Sharing.isAvailableAsync())) {
+            Alert.alert('Error', 'Sharing is not available on this device');
+            return;
+        }
+        await Sharing.shareAsync(item.uri, { dialogTitle: `Share ${item.name}` });
+    } catch (error) {
+        Alert.alert('Error', 'Could not share audio file');
+    }
+  };
+
   return (
     <View style={styles.flex1}>
       {/* 1. FIXED RECORDER AREA (Top) */}
       <View style={styles.modernRecorder}>
         <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20}}>
             <View>
-                <Text style={styles.modernTimerLabel}>{recording ? 'RECORDING' : 'READY'}</Text>
-                <Text style={styles.modernTimerText}>{formatTime(timer)}</Text>
+                <Text style={styles.modernTimerLabel}>{activeRecording ? 'RECORDING' : 'READY'}</Text>
+                <Text style={styles.modernTimerText}>{formatTime(activeTimer)}</Text>
             </View>
-            <TouchableOpacity onPress={recording ? stopRecording : startRecording}>
+            <TouchableOpacity onPress={activeRecording ? handleStopRecording : onStartRecording}>
                 <Animated.View style={[
                     styles.recordButtonOuter, 
-                    recording ? { transform: [{ scale: recordingAnim }], borderColor: theme.colors.danger } : {}
+                    activeRecording ? { transform: [{ scale: recordingAnim }], borderColor: theme.colors.danger } : {}
                 ]}>
-                    <View style={[styles.recordButtonInner, { backgroundColor: recording ? theme.colors.danger : theme.colors.primary }]}>
-                          {recording && <View style={styles.stopSquare} />}
+                    <View style={[styles.recordButtonInner, { backgroundColor: activeRecording ? theme.colors.danger : theme.colors.primary }]}>
+                          {activeRecording && <View style={styles.stopSquare} />}
                     </View>
                 </Animated.View>
             </TouchableOpacity>
         </View>
         <Text style={{textAlign:'center', marginTop: 10, color: '#999', fontSize: 12}}>
-            {recording ? 'App background recording active' : 'Tap to start • Tap again to stop'}
+            {activeRecording ? 'App background recording active' : 'Tap to start • Tap again to stop'}
         </Text>
       </View>
 
@@ -797,9 +864,15 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes }: { voiceNotes: VoiceNote[], setV
                         </View>
                     </View>
 
-                    {/* Controls */}
+                    {/* Controls (UPDATED WITH SHARE) */}
                     <View style={{flexDirection:'row', alignItems:'center'}}>
                         {item.isLocked && <Ionicons name="lock-closed" size={14} color={theme.colors.danger} style={{marginRight: 10}} />}
+                        
+                        {/* Share Button */}
+                        <TouchableOpacity onPress={() => shareAudio(item)} style={{padding: 6, marginRight: 4}}>
+                            <Ionicons name="share-social-outline" size={18} color="#9CA3AF" />
+                        </TouchableOpacity>
+
                         <TouchableOpacity onPress={toggleLoop} style={{padding: 6}}>
                             <MaterialCommunityIcons name="repeat" size={18} color={isLooping && playingId === item.id ? theme.colors.primary : "#ccc"} />
                         </TouchableOpacity>
@@ -931,10 +1004,10 @@ const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { child
 // 8. SHARED COMPONENTS & STYLES
 // ==========================================
 
-const TabButton = ({ title, icon, active, onPress }: any) => (
-  <TouchableOpacity onPress={onPress} style={[styles.tabBtn, active && styles.tabBtnActive]}>
-    <Ionicons name={icon} size={20} color={active ? theme.colors.primary : '#888'} />
-    <Text style={[styles.tabText, active && styles.tabTextActive]}>{title}</Text>
+const TabButton = ({ title, icon, active, onPress, extraStyle, textStyle }: any) => (
+  <TouchableOpacity onPress={onPress} style={[styles.tabBtn, active && styles.tabBtnActive, extraStyle]}>
+    <Ionicons name={icon} size={20} color={active ? theme.colors.primary : '#888'} style={textStyle} />
+    <Text style={[styles.tabText, active && styles.tabTextActive, textStyle]}>{title}</Text>
   </TouchableOpacity>
 );
 
