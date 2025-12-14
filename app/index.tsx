@@ -7,8 +7,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Dimensions,
   Image,
-  Keyboard,
   Modal,
   RefreshControl,
   ScrollView,
@@ -18,7 +18,7 @@ import {
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
-  View,
+  View
 } from 'react-native';
 
 import { useAppData } from '../src/context/AppDataContext';
@@ -28,16 +28,16 @@ import { useAppData } from '../src/context/AppDataContext';
 // ==========================================
 const PLANNER_KEY = 'plannerTasks_v3';
 const FOCUS_KEY = 'focus_of_day_v1';
+const WATER_KEY = 'water_tracker_v1';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const THEME = {
-  bg: '#F3F4F6',           // Slightly darker white for contrast
+  bg: '#F8FAFC',           // Ultra Light Blue-Gray (Cleaner look)
   textMain: '#111827',     // Near Black
-  textSub: '#6B7280',      // Gray
-  accentBlue: '#2563EB',   // Primary Blue
-  
-  // Modern Dashboard Colors
-  weatherGradient: '#3B82F6', // Solid Blue for Weather Card
-  cardWhite: '#FFFFFF',
+  textSub: '#64748B',      // Slate Gray
+  accentBlue: '#3B82F6',   // Bright Blue
+  accentDark: '#1E293B',   // Slate 800 (for dark cards)
   
   // Status Colors
   success: '#10B981',
@@ -45,12 +45,20 @@ const THEME = {
   danger: '#EF4444',
   
   // Github Streak Colors
-  streak0: '#EBEDF0',
-  streak1: '#9BE9A8',
-  streak2: '#40C463',
-  streak3: '#30A14E',
-  streak4: '#216E39',
+  streak0: '#E2E8F0',
+  streak1: '#86EFAC',
+  streak2: '#4ADE80',
+  streak3: '#22C55E',
+  streak4: '#166534',
 };
+
+const QUOTES = [
+  "Dream big. Start small. Act now.",
+  "Focus on being productive instead of busy.",
+  "The future depends on what you do today.",
+  "Don't watch the clock; do what it does. Keep going.",
+  "Small progress is still progress.",
+];
 
 // ==========================================
 // 2. HELPER FUNCTIONS
@@ -94,10 +102,16 @@ const getWeatherMeta = (wmoCode: number) => {
 };
 
 const getAqiMeta = (aqi: number) => {
-  if (aqi <= 50) return { label: 'Good', color: '#10B981', percentage: '100%' };
-  if (aqi <= 100) return { label: 'Moderate', color: '#F59E0B', percentage: '60%' };
-  if (aqi <= 150) return { label: 'Unhealthy', color: '#EF4444', percentage: '30%' };
-  return { label: 'Hazardous', color: '#7F1D1D', percentage: '10%' };
+  if (aqi <= 50) return { label: 'Good', color: '#4ADE80', percentage: '100%' };
+  if (aqi <= 100) return { label: 'Moderate', color: '#FACC15', percentage: '60%' };
+  if (aqi <= 150) return { label: 'Unhealthy', color: '#F87171', percentage: '30%' };
+  return { label: 'Hazardous', color: '#EF4444', percentage: '10%' };
+};
+
+const getGreeting = (hour: number) => {
+  if (hour < 12) return "Good Morning";
+  if (hour < 18) return "Good Afternoon";
+  return "Good Evening";
 };
 
 // ==========================================
@@ -134,6 +148,13 @@ const HomeScreen: React.FC = () => {
   const [todayTasks, setTodayTasks] = useState<any[]>([]);
   const [focusText, setFocusText] = useState('');
   
+  // Water Tracker
+  const [waterCount, setWaterCount] = useState(0);
+  const WATER_GOAL = 8;
+  
+  // Quote
+  const [quote, setQuote] = useState(QUOTES[0]);
+
   // Streak Data
   const [streakHistory, setStreakHistory] = useState<any[]>([]);
   const [currentStreak, setCurrentStreak] = useState(0);
@@ -148,9 +169,10 @@ const HomeScreen: React.FC = () => {
   const [role, setRole] = useState(profile.role);
 
   // Time Strings
-  const dayName = now.toLocaleDateString('en-US', { weekday: 'short' });
-  const dayNumber = now.getDate();
-  const monthName = now.toLocaleDateString('en-US', { month: 'short' });
+  const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
+  const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const greeting = getGreeting(now.getHours());
 
   // --- 0. PICK IMAGE FUNCTION ---
   const pickImage = async () => {
@@ -205,16 +227,17 @@ const HomeScreen: React.FC = () => {
     } catch (e) { console.log(e); }
   };
 
-  // --- 2. CALCULATE TASKS & STREAKS ---
-  const loadRealTimeTasks = async () => {
+  // --- 2. LOAD DATA (Tasks, Streak, Water) ---
+  const loadData = async () => {
     try {
+      // TASKS & STREAK
       const tasksJson = await AsyncStorage.getItem(PLANNER_KEY);
       if (tasksJson) {
         const allTasks = JSON.parse(tasksJson);
-        const now = new Date();
-        const todayStr = getLocalDateString(now);
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const todayStr = getLocalDateString(new Date());
+        const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
 
+        // Filter for today
         const filtered = allTasks.filter((t: any) => {
            const occurs = occursOnDate(t, todayStr);
            const isException = t.completedExceptions && t.completedExceptions.includes(todayStr);
@@ -232,7 +255,7 @@ const HomeScreen: React.FC = () => {
         filtered.sort((a: any, b: any) => (a.startTime || '23:59').localeCompare(b.startTime || '23:59'));
         setTodayTasks(filtered);
 
-        // Streak Calculation
+        // Streak History
         const history = [];
         for (let i = 13; i >= 0; i--) {
             const d = new Date();
@@ -264,41 +287,59 @@ const HomeScreen: React.FC = () => {
         setCurrentStreak(tempStreak);
         setStreakHistory(history);
       }
-    } catch (e) {}
-  };
 
-  // --- 3. FOCUS OF THE DAY ---
-  const loadFocus = async () => {
-      try {
-          const saved = await AsyncStorage.getItem(FOCUS_KEY);
-          if (saved) setFocusText(saved);
-      } catch(e) {}
+      // FOCUS
+      const savedFocus = await AsyncStorage.getItem(FOCUS_KEY);
+      if (savedFocus) setFocusText(savedFocus);
+
+      // WATER
+      const todayStr = getLocalDateString(new Date());
+      const savedWater = await AsyncStorage.getItem(WATER_KEY);
+      if (savedWater) {
+          const parsedWater = JSON.parse(savedWater);
+          if (parsedWater.date === todayStr) {
+              setWaterCount(parsedWater.count);
+          } else {
+              setWaterCount(0); // Reset for new day
+          }
+      }
+
+      // QUOTE (Random)
+      const randomIndex = Math.floor(Math.random() * QUOTES.length);
+      setQuote(QUOTES[randomIndex]);
+
+    } catch (e) {}
   };
 
   const saveFocus = async (text: string) => {
       setFocusText(text);
-      try {
-          await AsyncStorage.setItem(FOCUS_KEY, text);
-      } catch(e) {}
+      try { await AsyncStorage.setItem(FOCUS_KEY, text); } catch(e) {}
+  };
+
+  const addWater = async () => {
+      const newCount = waterCount >= WATER_GOAL ? 0 : waterCount + 1;
+      setWaterCount(newCount);
+      const data = { date: getLocalDateString(new Date()), count: newCount };
+      try { await AsyncStorage.setItem(WATER_KEY, JSON.stringify(data)); } catch(e) {}
   };
 
   useEffect(() => {
     fetchEnvironment();
-    loadFocus();
+    loadData();
     const interval = setInterval(() => {
         const current = new Date();
         setNow(current);
-        if (current.getSeconds() === 0) loadRealTimeTasks();
+        if (current.getSeconds() === 0) loadData();
         if (current.getSeconds() % 15 === 0) fetchEnvironment();
     }, 1000);
     return () => clearInterval(interval);
   }, []);
 
-  useFocusEffect(useCallback(() => { loadRealTimeTasks(); }, []));
+  useFocusEffect(useCallback(() => { loadData(); }, []));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([fetchEnvironment(), loadRealTimeTasks(), loadFocus()]);
+    await Promise.all([fetchEnvironment(), loadData()]);
     setRefreshing(false);
   }, []);
 
@@ -317,7 +358,7 @@ const HomeScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
 
       <ScrollView 
         contentContainerStyle={styles.scrollContent}
@@ -325,7 +366,7 @@ const HomeScreen: React.FC = () => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         
-        {/* HEADER */}
+        {/* --- 1. HEADER (LOGO + PROFILE) --- */}
         <View style={styles.headerRow}>
            <View style={{flexDirection:'row', alignItems:'center', gap: 10}}>
                <Image 
@@ -337,7 +378,7 @@ const HomeScreen: React.FC = () => {
            </View>
            
            <TouchableOpacity onPress={() => setEditVisible(true)}>
-             <View>
+             <View style={styles.avatarContainer}>
                 {profile.avatarUri ? 
                     <Image source={{ uri: profile.avatarUri }} style={styles.avatar} /> : 
                     <View style={styles.avatarPlaceholder}><Text style={styles.avatarInitials}>{profile.name?.[0]}</Text></View>
@@ -349,94 +390,107 @@ const HomeScreen: React.FC = () => {
            </TouchableOpacity>
         </View>
 
-        {/* --- STREAK SECTION --- */}
+        {/* --- 2. PERSONAL GREETING --- */}
+        <View style={{marginBottom: 16}}>
+            <Text style={styles.greetingText}>{greeting}, {profile.name || 'User'}</Text>
+        </View>
+
+        {/* --- 3. COMMAND CENTER (Weather & Net) --- */}
+        <BouncyCard style={styles.commandCard}>
+            <View style={styles.commandTopRow}>
+                <View>
+                    <Text style={styles.commandTemp}>{weather.temp}</Text>
+                    <Text style={styles.commandCondition}>{weatherMeta.label} • {weather.city}</Text>
+                </View>
+                <Ionicons name={weatherMeta.icon as any} size={48} color="#FFF" />
+            </View>
+
+            <View style={styles.commandDivider} />
+
+            <View style={styles.commandStatsRow}>
+                 {/* Date & Time */}
+                <View style={styles.commandStat}>
+                     <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.7)" />
+                     <Text style={styles.commandStatText}>{dateStr} • {timeStr}</Text>
+                </View>
+                {/* AQI */}
+                <View style={styles.commandStat}>
+                     <Ionicons name="leaf-outline" size={16} color={aqiMeta.color} />
+                     <Text style={[styles.commandStatText, {color: aqiMeta.color}]}>AQI {weather.aqi}</Text>
+                </View>
+                {/* Ping */}
+                <View style={styles.commandStat}>
+                     <Ionicons name="wifi-outline" size={16} color="rgba(255,255,255,0.7)" />
+                     <Text style={styles.commandStatText}>{ping ? `${ping}ms` : 'Offline'}</Text>
+                </View>
+            </View>
+        </BouncyCard>
+
+        {/* --- 4. BENTO GRID (Focus & Water) --- */}
+        <View style={styles.bentoRow}>
+            {/* FOCUS WIDGET */}
+            <BouncyCard style={[styles.bentoItem, styles.focusCard]}>
+                <View style={styles.bentoHeader}>
+                    <View style={[styles.iconCircle, {backgroundColor: '#DBEAFE'}]}>
+                        <Ionicons name="locate" size={16} color={THEME.accentBlue} />
+                    </View>
+                    <Text style={styles.bentoTitle}>Focus</Text>
+                </View>
+                <TextInput 
+                    style={styles.focusInput}
+                    placeholder="Set main goal..."
+                    value={focusText}
+                    onChangeText={saveFocus}
+                    placeholderTextColor="#94A3B8"
+                    multiline
+                    maxLength={50}
+                    blurOnSubmit
+                />
+            </BouncyCard>
+
+            {/* WATER WIDGET */}
+            <BouncyCard onPress={addWater} style={[styles.bentoItem, styles.waterCard]}>
+                <View style={styles.bentoHeader}>
+                    <View style={[styles.iconCircle, {backgroundColor: '#E0F2FE'}]}>
+                        <Ionicons name="water" size={16} color="#0EA5E9" />
+                    </View>
+                    <Text style={styles.bentoTitle}>Hydration</Text>
+                </View>
+                <View style={styles.waterContent}>
+                    <Text style={styles.waterCount}>{waterCount}<Text style={styles.waterTotal}>/{WATER_GOAL}</Text></Text>
+                    <Text style={styles.waterUnit}>glasses</Text>
+                </View>
+                {/* Progress Bar */}
+                <View style={styles.waterBarBg}>
+                    <View style={[styles.waterBarFill, { width: `${(waterCount/WATER_GOAL)*100}%` }]} />
+                </View>
+            </BouncyCard>
+        </View>
+
+        {/* --- 5. STREAK & CONSISTENCY --- */}
         <BouncyCard style={styles.streakCard}>
              <View style={styles.streakHeader}>
                  <View style={{flexDirection:'row', alignItems:'center', gap: 6}}>
                      <Ionicons name="flame" size={18} color="#EA580C" />
-                     <Text style={styles.streakTitle}>Daily Activity</Text>
+                     <Text style={styles.streakTitle}>Consistency</Text>
                  </View>
-                 <Text style={styles.streakCount}>{currentStreak} Day Streak {currentStreak > 2 ? '🔥' : ''}</Text>
+                 <Text style={styles.streakCount}>{currentStreak} Day Streak 🔥</Text>
              </View>
              <View style={styles.streakGrid}>
                  {streakHistory.map((item, index) => renderStreakBox(item, index))}
              </View>
-             <View style={styles.streakFooter}>
-                 <Text style={styles.streakFooterText}>Last 14 Days</Text>
-                 <View style={styles.streakLegend}>
-                    <View style={[styles.legendBox, {backgroundColor: THEME.streak0}]} />
-                    <View style={[styles.legendBox, {backgroundColor: THEME.streak2}]} />
-                    <View style={[styles.legendBox, {backgroundColor: THEME.streak4}]} />
-                 </View>
-             </View>
         </BouncyCard>
 
-        {/* --- FOCUS OF THE DAY --- */}
-        <BouncyCard style={styles.focusCard}>
-            <View style={{flexDirection:'row', alignItems:'center', gap: 8, marginBottom: 8}}>
-                <Ionicons name="radio-button-on" size={16} color={THEME.accentBlue} />
-                <Text style={styles.focusLabel}>Focus of the Day</Text>
-            </View>
-            <TextInput 
-                style={styles.focusInput}
-                placeholder="What is your main goal today?"
-                value={focusText}
-                onChangeText={saveFocus}
-                placeholderTextColor="#9CA3AF"
-                multiline
-                maxLength={60}
-                blurOnSubmit
-                onSubmitEditing={Keyboard.dismiss}
-            />
-        </BouncyCard>
+        {/* --- 6. DAILY QUOTE --- */}
+        <View style={styles.quoteContainer}>
+            <Text style={styles.quoteText}>"{quote}"</Text>
+        </View>
 
-        {/* --- OVERVIEW (SINGLE SUPER CARD - THINNER) --- */}
-        <BouncyCard style={styles.superCard}>
-            {/* Top: Weather */}
-            <View style={styles.superWeatherRow}>
-                <View>
-                    <Text style={styles.superTemp}>{weather.temp}</Text>
-                    <View style={{flexDirection:'row', alignItems:'center', gap: 6}}>
-                        <Text style={styles.superCondition}>{weatherMeta.label}</Text>
-                        <View style={styles.dotSeparator} />
-                        <Text style={styles.superLocation}>{weather.city}</Text>
-                    </View>
-                </View>
-                <Ionicons name={weatherMeta.icon as any} size={42} color={THEME.weatherGradient} />
-            </View>
-
-            <View style={styles.divider} />
-
-            {/* Bottom: 3 Stats Cols */}
-            <View style={styles.superStatsRow}>
-                {/* Calendar */}
-                <View style={styles.superStatItem}>
-                    <Ionicons name="calendar-outline" size={18} color="#EF4444" style={{marginBottom:4}} />
-                    <Text style={styles.superStatValue}>{dayNumber} {monthName}</Text>
-                    <Text style={styles.superStatLabel}>{dayName}</Text>
-                </View>
-
-                {/* AQI */}
-                <View style={styles.superStatItem}>
-                    <Ionicons name="leaf-outline" size={18} color={aqiMeta.color} style={{marginBottom:4}} />
-                    <Text style={[styles.superStatValue, {color:aqiMeta.color}]}>{weather.aqi}</Text>
-                    <Text style={styles.superStatLabel}>AQI: {aqiMeta.label}</Text>
-                </View>
-
-                {/* Network */}
-                <View style={styles.superStatItem}>
-                    <Ionicons name="wifi-outline" size={18} color="#7C3AED" style={{marginBottom:4}} />
-                    <Text style={[styles.superStatValue, {color:'#7C3AED'}]}>{ping ? ping : '--'} ms</Text>
-                    <Text style={styles.superStatLabel}>{netInfo?.isConnected ? 'Online' : 'Offline'}</Text>
-                </View>
-            </View>
-        </BouncyCard>
-
-        {/* --- UP NEXT --- */}
+        {/* --- 7. UP NEXT TASKS --- */}
         <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitleNoMargin}>Up Next</Text>
             <TouchableOpacity onPress={() => router.push('/planner')}>
-                <Text style={styles.linkText}>View Planner</Text>
+                <Text style={styles.linkText}>See All</Text>
             </TouchableOpacity>
         </View>
         
@@ -444,16 +498,19 @@ const HomeScreen: React.FC = () => {
             <BouncyCard onPress={() => router.push('/planner')} style={styles.taskCard}>
                     <View style={styles.taskLeftBar} />
                     <View style={styles.taskContent}>
-                        <View style={{flexDirection:'row', justifyContent:'space-between'}}>
+                        <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
                            <Text style={styles.taskTitle}>{nextTask.title}</Text>
-                           <Text style={styles.taskTime}>{nextTask.startTime || 'All Day'}</Text>
+                           <View style={styles.timeTag}>
+                               <Ionicons name="time-outline" size={12} color={THEME.accentBlue} />
+                               <Text style={styles.taskTime}>{nextTask.startTime || 'Now'}</Text>
+                           </View>
                         </View>
                         <Text style={styles.taskSub} numberOfLines={1}>
-                            {nextTask.notes || 'No additional details'}
+                            {nextTask.notes || 'No additional details provided'}
                         </Text>
                         {todayTasks.length > 1 && (
-                            <Text style={{fontSize: 11, color: THEME.accentBlue, marginTop: 4}}>
-                                + {todayTasks.length - 1} more tasks today
+                            <Text style={{fontSize: 11, color: THEME.textSub, marginTop: 6, fontWeight:'500'}}>
+                                + {todayTasks.length - 1} more tasks waiting
                             </Text>
                         )}
                     </View>
@@ -461,15 +518,16 @@ const HomeScreen: React.FC = () => {
             </BouncyCard>
         ) : (
             <View style={styles.emptyBox}>
-                <Ionicons name="calendar" size={24} color="#D1D5DB" />
-                <Text style={styles.emptyText}>No upcoming tasks for today.</Text>
+                <Ionicons name="checkmark-circle-outline" size={40} color="#CBD5E1" />
+                <Text style={styles.emptyText}>You're all caught up!</Text>
+                <Text style={styles.emptySub}>Enjoy your free time.</Text>
             </View>
         )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* PROFESSIONAL PROFILE EDIT MODAL */}
+      {/* --- EDIT PROFILE MODAL --- */}
       <Modal visible={editVisible} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
             <View style={styles.modalContent}>
@@ -481,36 +539,29 @@ const HomeScreen: React.FC = () => {
                 </View>
                 
                 <View style={{alignItems:'center', marginBottom: 24}}>
-                    <View style={styles.modalAvatarContainer}>
+                    <TouchableOpacity onPress={pickImage}>
                         {profile.avatarUri ? 
                            <Image source={{ uri: profile.avatarUri }} style={styles.modalAvatar} /> : 
-                           <View style={styles.modalAvatarPlaceholder}>
-                               <Text style={{fontSize:36, color:'#9CA3AF'}}>{profile.name?.[0]}</Text>
-                           </View>
+                           <View style={styles.modalAvatarPlaceholder}><Text style={{fontSize:36, color:'#9CA3AF'}}>{profile.name?.[0]}</Text></View>
                         }
-                    </View>
-                    
-                    <TouchableOpacity onPress={pickImage} style={styles.changePhotoBtn}>
-                        <Ionicons name="camera-outline" size={18} color="#4B5563" />
-                        <Text style={styles.changePhotoText}>Change Photo</Text>
+                        <View style={styles.changePhotoBadge}><Ionicons name="camera" size={14} color="#FFF" /></View>
                     </TouchableOpacity>
                 </View>
 
-                <View style={{width:'100%', gap: 12}}>
+                <View style={{width:'100%', gap: 16}}>
                     <View>
                         <Text style={styles.inputLabel}>Display Name</Text>
-                        <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Enter your name" />
+                        <TextInput style={styles.input} value={name} onChangeText={setName} />
                     </View>
                     <View>
                         <Text style={styles.inputLabel}>Role / Title</Text>
-                        <TextInput style={styles.input} value={role} onChangeText={setRole} placeholder="e.g. Developer" />
+                        <TextInput style={styles.input} value={role} onChangeText={setRole} />
                     </View>
                 </View>
                 
-                <View style={styles.modalBtns}>
-                    <TouchableOpacity onPress={() => setEditVisible(false)} style={styles.btnCancel}><Text style={styles.btnText}>Cancel</Text></TouchableOpacity>
-                    <TouchableOpacity onPress={() => { updateProfile({...profile, name, role}); setEditVisible(false) }} style={styles.btnSave}><Text style={[styles.btnText, {color:'#fff'}]}>Save Changes</Text></TouchableOpacity>
-                </View>
+                <TouchableOpacity onPress={() => { updateProfile({...profile, name, role}); setEditVisible(false) }} style={styles.btnSave}>
+                    <Text style={styles.btnTextWhite}>Save Changes</Text>
+                </TouchableOpacity>
             </View>
         </View>
       </Modal>
@@ -522,102 +573,105 @@ const HomeScreen: React.FC = () => {
 export default HomeScreen;
 
 // ==========================================
-// 5. STYLES (MODERNIZED & THINNER CARDS)
+// 5. STYLES
 // ==========================================
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F3F4F6' },
-  scrollContent: { padding: 20, paddingTop: 60 },
+  container: { flex: 1, backgroundColor: THEME.bg },
+  scrollContent: { padding: 20, paddingTop: 50 },
 
-  // Header
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  // --- Header ---
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   appNameText: { fontSize: 28, fontWeight: '900', color: '#002C8A', letterSpacing: -0.5 },
   logoImage: { width: 42, height: 42 },
   
-  // Profile Picture
-  avatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: '#fff' },
-  avatarPlaceholder: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#E5E7EB', justifyContent:'center', alignItems:'center', borderWidth: 2, borderColor: '#fff' },
-  avatarInitials: { fontSize: 20, fontWeight:'600', color: '#6B7280' },
-  editBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: THEME.accentBlue, width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#fff' },
+  // Greeting Sub-header
+  greetingText: { fontSize: 22, color: THEME.textMain, fontWeight: '700', letterSpacing: -0.5 },
 
-  // Streak Card
+  // Profile
+  avatarContainer: { position: 'relative' },
+  avatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#fff' },
+  avatarPlaceholder: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E2E8F0', justifyContent:'center', alignItems:'center', borderWidth: 2, borderColor: '#fff' },
+  avatarInitials: { fontSize: 18, fontWeight:'700', color: '#64748B' },
+  editBadge: { position: 'absolute', bottom: -2, right: -2, backgroundColor: THEME.textMain, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
+
+  // --- Command Center (Weather) ---
+  commandCard: {
+      backgroundColor: THEME.accentDark, borderRadius: 24, padding: 20, marginBottom: 20,
+      shadowColor: "#1E293B", shadowOffset: {width:0, height:8}, shadowOpacity:0.25, shadowRadius:12, elevation: 6
+  },
+  commandTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  commandTemp: { fontSize: 42, fontWeight: '800', color: '#FFF', letterSpacing: -1 },
+  commandCondition: { fontSize: 14, fontWeight: '600', color: '#94A3B8', marginTop: 4 },
+  commandDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.15)', marginVertical: 16 },
+  commandStatsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  commandStat: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  commandStatText: { fontSize: 13, color: '#FFF', fontWeight: '600' },
+
+  // --- Bento Grid ---
+  bentoRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  bentoItem: { flex: 1, backgroundColor: '#FFF', borderRadius: 20, padding: 16, shadowColor: "#000", shadowOffset: {width:0, height:2}, shadowOpacity:0.03, shadowRadius:6, elevation: 1 },
+  bentoHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  iconCircle: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  bentoTitle: { fontSize: 14, fontWeight: '700', color: THEME.textMain },
+  
+  // Focus Specific
+  focusCard: { minHeight: 140 },
+  focusInput: { fontSize: 15, color: THEME.textMain, fontWeight: '500', lineHeight: 22 },
+  
+  // Water Specific
+  waterCard: { minHeight: 140, justifyContent:'space-between' },
+  waterContent: { alignItems:'center', marginVertical: 4 },
+  waterCount: { fontSize: 32, fontWeight: '800', color: '#0EA5E9' },
+  waterTotal: { fontSize: 16, color: '#94A3B8', fontWeight: '600' },
+  waterUnit: { fontSize: 12, color: '#64748B', fontWeight: '500' },
+  waterBarBg: { height: 6, backgroundColor: '#F1F5F9', borderRadius: 3, width: '100%', overflow:'hidden' },
+  waterBarFill: { height: '100%', backgroundColor: '#0EA5E9', borderRadius: 3 },
+
+  // --- Streak Card ---
   streakCard: {
-    backgroundColor: '#fff', borderRadius: 24, padding: 20, marginBottom: 16,
-    shadowColor: "#000", shadowOffset: {width:0, height:4}, shadowOpacity:0.05, shadowRadius:10, elevation:2
+    backgroundColor: '#fff', borderRadius: 20, padding: 16, marginBottom: 20,
+    shadowColor: "#000", shadowOffset: {width:0, height:2}, shadowOpacity:0.03, shadowRadius:6, elevation: 1
   },
   streakHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   streakTitle: { fontSize: 15, fontWeight: '700', color: '#374151' },
-  streakCount: { fontSize: 13, fontWeight: '700', color: '#EA580C', backgroundColor: '#FFF7ED', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, overflow:'hidden' },
-  streakGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  streakBox: { width: 18, height: 18, borderRadius: 5 }, 
-  streakFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  streakFooterText: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
-  streakLegend: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  legendBox: { width: 10, height: 10, borderRadius: 3 },
+  streakCount: { fontSize: 12, fontWeight: '700', color: '#EA580C', backgroundColor: '#FFF7ED', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, overflow:'hidden' },
+  streakGrid: { flexDirection: 'row', justifyContent: 'space-between' },
+  streakBox: { width: (SCREEN_WIDTH - 80) / 14, height: 24, borderRadius: 4 }, 
 
-  // --- FOCUS OF THE DAY ---
-  focusCard: {
-      backgroundColor: '#fff', borderRadius: 20, padding: 16, marginBottom: 24,
-      shadowColor: "#000", shadowOffset: {width:0, height:2}, shadowOpacity:0.03, shadowRadius:4, elevation: 1
-  },
-  focusLabel: { fontSize: 12, fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: 0.5 },
-  focusInput: { fontSize: 16, color: '#1F2937', fontWeight: '500', paddingVertical: 4 },
+  // --- Quote ---
+  quoteContainer: { alignItems:'center', paddingHorizontal: 20, marginBottom: 30 },
+  quoteText: { fontSize: 14, fontStyle: 'italic', color: '#94A3B8', textAlign: 'center', fontWeight: '500' },
 
-  // --- SINGLE OVERVIEW CARD ("Super Card") - THINNER ---
-  superCard: {
-      backgroundColor: '#FFF', borderRadius: 24, padding: 16, // Reduced padding from 18 -> 16
-      shadowColor: "#000", shadowOffset: {width:0, height:4}, shadowOpacity:0.05, shadowRadius:10, elevation: 3
-  },
-  superWeatherRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  superTemp: { fontSize: 38, fontWeight: '800', color: '#1F2937', letterSpacing: -1 },
-  superCondition: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
-  superLocation: { fontSize: 14, fontWeight: '600', color: '#9CA3AF' },
-  dotSeparator: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB', marginHorizontal: 2 },
+  // --- Up Next ---
+  sectionTitleNoMargin: { fontSize: 18, fontWeight: '800', color: THEME.textMain },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  linkText: { color: THEME.accentBlue, fontWeight: '700', fontSize: 13 },
   
-  divider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 12 }, // Reduced vertical margin
-  
-  superStatsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  superStatItem: { alignItems: 'flex-start', flex: 1 },
-  superStatValue: { fontSize: 14, fontWeight: '700', color: '#1F2937', marginBottom: 2 },
-  superStatLabel: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
-
-  // --- UP NEXT (Shared Styles) ---
-  sectionTitleNoMargin: { fontSize: 20, fontWeight: '800', color: '#111827' },
-  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 32, marginBottom: 16 },
-  linkText: { color: THEME.accentBlue, fontWeight: '700', fontSize: 14 },
   taskCard: {
-    backgroundColor: '#fff', borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 10,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 4, elevation: 1
+    backgroundColor: '#fff', borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 10,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 2
   },
-  taskLeftBar: { width: 4, height: 40, backgroundColor: THEME.accentBlue, borderRadius: 2, marginRight: 16 },
+  taskLeftBar: { width: 4, height: 36, backgroundColor: THEME.accentBlue, borderRadius: 2, marginRight: 14 },
   taskContent: { flex: 1 },
-  taskTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
-  taskTime: { fontSize: 14, fontWeight: '600', color: THEME.accentBlue, marginBottom: 2 },
-  taskSub: { fontSize: 13, color: '#9CA3AF' },
-  emptyBox: { padding: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', borderRadius: 20, gap: 12, borderStyle: 'dashed', borderWidth: 2, borderColor: '#E5E7EB' },
-  emptyText: { color: '#9CA3AF', fontWeight: '500' },
+  taskTitle: { fontSize: 15, fontWeight: '700', color: THEME.textMain, marginBottom: 4 },
+  timeTag: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EFF6FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, alignSelf: 'flex-start' },
+  taskTime: { fontSize: 11, fontWeight: '700', color: THEME.accentBlue },
+  taskSub: { fontSize: 13, color: '#64748B', marginTop: 6 },
+  
+  emptyBox: { padding: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9', borderRadius: 20, gap: 8 },
+  emptyText: { color: THEME.textMain, fontWeight: '700', fontSize: 15 },
+  emptySub: { color: '#94A3B8', fontWeight: '500' },
 
-  // PROFESSIONAL MODAL STYLES
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#fff', borderRadius: 24, padding: 24, alignItems: 'center', width: '100%', maxWidth: 340, alignSelf:'center' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 20, alignItems: 'center' },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#111827' },
-  
-  // Modal Avatar
-  modalAvatarContainer: { marginBottom: 12, shadowColor: "#000", shadowOffset: {width:0, height:4}, shadowOpacity:0.1, shadowRadius:10, elevation: 3 },
-  modalAvatar: { width: 90, height: 90, borderRadius: 45, borderWidth: 3, borderColor: '#FFF' },
-  modalAvatarPlaceholder: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#F3F4F6', justifyContent:'center', alignItems:'center', borderWidth: 3, borderColor: '#FFF' },
-  
-  // Change Photo Button
-  changePhotoBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F3F4F6', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20 },
-  changePhotoText: { fontSize: 13, fontWeight: '600', color: '#4B5563' },
-  
-  // Inputs
-  inputLabel: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6, marginLeft: 4 },
-  input: { backgroundColor: '#F9FAFB', padding: 14, borderRadius: 12, width: '100%', fontSize: 15, borderWidth: 1, borderColor: '#E5E7EB', color: '#1F2937' },
-  
-  // Action Buttons
-  modalBtns: { flexDirection: 'row', gap: 12, marginTop: 24, width: '100%' },
-  btnCancel: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#F3F4F6', alignItems: 'center' },
-  btnSave: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: THEME.accentBlue, alignItems: 'center', shadowColor: THEME.accentBlue, shadowOffset: {width:0, height:4}, shadowOpacity:0.2, shadowRadius:8, elevation: 3 },
-  btnText: { fontWeight: '700', fontSize: 15, color: '#4B5563' },
+  // --- MODAL ---
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 24, padding: 24, alignItems: 'center' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: THEME.textMain },
+  modalAvatar: { width: 90, height: 90, borderRadius: 45 },
+  modalAvatarPlaceholder: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#F1F5F9', justifyContent:'center', alignItems:'center' },
+  changePhotoBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: THEME.accentBlue, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#FFF' },
+  inputLabel: { fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 6, marginLeft: 4, textTransform:'uppercase' },
+  input: { backgroundColor: '#F8FAFC', padding: 14, borderRadius: 12, width: '100%', fontSize: 15, borderWidth: 1, borderColor: '#E2E8F0', color: THEME.textMain },
+  btnSave: { marginTop: 20, width:'100%', padding: 16, borderRadius: 14, backgroundColor: THEME.textMain, alignItems: 'center' },
+  btnTextWhite: { fontWeight: '700', fontSize: 15, color: '#fff' },
 });
