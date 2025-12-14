@@ -94,9 +94,7 @@ function InnerLayout() {
       />
 
       {/* --- HIDDEN TABS (Routes that exist but shouldn't show in the bottom bar) --- */}
-      <Tabs.Screen name="projects" options={{ href: null }} />
-      <Tabs.Screen name="about" options={{ href: null }} />
-      <Tabs.Screen name="contact" options={{ href: null }} />
+    
     </Tabs>
   );
 }

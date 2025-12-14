@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import React, {
   createContext,
@@ -7,16 +7,15 @@ import React, {
   useEffect,
   useState
 } from 'react';
-import { AppData, defaultData, Profile, Project } from '../data/defaultData';
+// Removing 'Project' from imports since we are cleaning up portfolio features
+import { AppData, defaultData, Profile } from '../data/defaultData';
 import { loadAppData, saveAppData } from '../storage/storage';
 
 type AppDataContextType = {
   data: AppData;
   loading: boolean;
   updateProfile: (profile: Profile) => void;
-  updateProject: (projectId: string, updated: Partial<Project>) => void;
   pickProfileImage: () => Promise<void>;
-  pickProjectScreenshot: (projectId: string) => Promise<void>;
 };
 
 const AppDataContext = createContext<AppDataContextType | undefined>(undefined);
@@ -42,13 +41,6 @@ export const AppDataProvider = ({ children }: { children: ReactNode }) => {
     persist({ ...data, profile });
   };
 
-  const updateProject = (projectId: string, updated: Partial<Project>) => {
-    const projects = data.projects.map((p) =>
-      p.id === projectId ? { ...p, ...updated } : p
-    );
-    persist({ ...data, projects });
-  };
-
   const ensurePermissions = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -59,31 +51,29 @@ export const AppDataProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const copyToAppStorage = async (uri: string): Promise<string> => {
-  try {
-    const fileName =
-      uri.split('/').pop() ?? `avatar-${Date.now().toString()}.jpg`;
+    try {
+      const fileName = uri.split('/').pop() ?? `avatar-${Date.now().toString()}.jpg`;
 
-    const dir = `${FileSystem.documentDirectory}profile`;
+      // @ts-ignore: Fix for documentDirectory type error
+      const docDir = FileSystem.documentDirectory || '';
+      const dir = `${docDir}profile`;
 
-    // Ensure profile/ directory exists
-    const dirInfo = await FileSystem.getInfoAsync(dir);
-    if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      // Ensure profile/ directory exists
+      const dirInfo = await FileSystem.getInfoAsync(dir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      }
+
+      const destUri = `${dir}/${fileName}`;
+      await FileSystem.copyAsync({ from: uri, to: destUri });
+
+      return destUri;
+    } catch (error) {
+      console.log('copyToAppStorage error', error);
+      // Fallback: just return the original uri if something fails
+      return uri;
     }
-
-    const destUri = `${dir}/${fileName}`;
-
-    // This is the legacy copyAsync, now safely imported from expo-file-system/legacy
-    await FileSystem.copyAsync({ from: uri, to: destUri });
-
-    return destUri;
-  } catch (error) {
-    console.log('copyToAppStorage error', error);
-    // Fallback: just return the original uri if something fails
-    return uri;
-  }
-};
-
+  };
 
   const pickProfileImage = async () => {
     const allowed = await ensurePermissions();
@@ -101,31 +91,13 @@ export const AppDataProvider = ({ children }: { children: ReactNode }) => {
     updateProfile({ ...data.profile, avatarUri: localUri });
   };
 
-  const pickProjectScreenshot = async (projectId: string) => {
-    const allowed = await ensurePermissions();
-    if (!allowed) return;
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.7
-    });
-
-    if (result.canceled || !result.assets?.length) return;
-
-    const localUri = await copyToAppStorage(result.assets[0].uri);
-    updateProject(projectId, { screenshotUri: localUri });
-  };
-
   return (
     <AppDataContext.Provider
       value={{
         data,
         loading,
         updateProfile,
-        updateProject,
-        pickProfileImage,
-        pickProjectScreenshot
+        pickProfileImage
       }}
     >
       {children}
