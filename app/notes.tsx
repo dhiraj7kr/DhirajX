@@ -1,7 +1,7 @@
 import { Feather, Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // Switched to AsyncStorage
 import { Audio } from 'expo-av';
 import * as Clipboard from 'expo-clipboard';
-import * as FileSystem from 'expo-file-system';
 import * as Linking from 'expo-linking';
 import * as Print from 'expo-print';
 import { useShareIntent } from 'expo-share-intent';
@@ -10,6 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  Dimensions,
   Easing,
   FlatList,
   Keyboard,
@@ -26,12 +27,13 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
 import { theme } from '../src/theme/theme';
 
 // ==========================================
-// 1. TYPES & DATA STRUCTURES
+// 1. CONFIGURATION & TYPES
 // ==========================================
+const STORAGE_KEY = 'app_data_notes_v12'; // Aligned with Planner naming convention
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -69,12 +71,8 @@ type AppDataStore = {
   voiceNotes: VoiceNote[];
 };
 
-// @ts-ignore
-const docDir = FileSystem.documentDirectory || ''; 
-const DATA_FILE_URI = docDir + 'app_data_notes_v12.json';
-
 // ==========================================
-// 2. HELPER FUNCTIONS & STORAGE
+// 2. HELPER FUNCTIONS
 // ==========================================
 
 const formatTime = (seconds: number) => {
@@ -88,37 +86,13 @@ const formatDateTime = (isoString: string) => {
   return date.toLocaleDateString() + ' • ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-// Calculates the next date based on recurrence type
 const calculateNextOccurrence = (currentDateStr: string, type: RecurrenceType): string => {
   const d = new Date(currentDateStr);
-  // If the date is in the past, reset it to today before adding interval? 
-  // For now, we strictly add the interval to the existing date to keep the cycle.
   if (type === 'daily') d.setDate(d.getDate() + 1);
   if (type === 'weekly') d.setDate(d.getDate() + 7);
   if (type === 'monthly') d.setMonth(d.getMonth() + 1);
   if (type === 'yearly') d.setFullYear(d.getFullYear() + 1);
   return d.toISOString();
-};
-
-const saveToJSON = async (data: AppDataStore) => {
-  if (!docDir) return;
-  try {
-    await FileSystem.writeAsStringAsync(DATA_FILE_URI, JSON.stringify(data), { encoding: 'utf8' });
-  } catch (error) {
-    console.error('Error saving data:', error);
-  }
-};
-
-const loadFromJSON = async (): Promise<AppDataStore> => {
-  if (!docDir) return { notes: [], links: [], voiceNotes: [] };
-  try {
-    const info = await FileSystem.getInfoAsync(DATA_FILE_URI);
-    if (!info.exists) return { notes: [], links: [], voiceNotes: [] };
-    const content = await FileSystem.readAsStringAsync(DATA_FILE_URI, { encoding: 'utf8' });
-    return JSON.parse(content);
-  } catch (error) {
-    return { notes: [], links: [], voiceNotes: [] };
-  }
 };
 
 // ==========================================
@@ -134,16 +108,28 @@ export default function NotesScreen() {
   const [activeRecording, setActiveRecording] = useState<Audio.Recording | null>(null);
   const [recordingTimer, setRecordingTimer] = useState(0);
 
+  // --- PERSISTENCE (PLANNER STYLE) ---
   useEffect(() => {
-    loadFromJSON().then((loadedData) => {
-      setData(loadedData);
-      setLoading(false);
-    });
+    (async () => {
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        if (stored) setData(JSON.parse(stored));
+      } catch (e) {
+        console.log('Load error', e);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  useEffect(() => {
-    if (!loading) saveToJSON(data);
-  }, [data, loading]);
+  const saveData = async (nextData: AppDataStore) => {
+    setData(nextData);
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+    } catch (e) {
+      console.error('Save error', e);
+    }
+  };
 
   // --- RECORDING FUNCTIONS ---
   const startGlobalRecording = async () => {
@@ -178,10 +164,10 @@ export default function NotesScreen() {
 
   const resetTimer = () => setRecordingTimer(0);
 
-  // --- UPDATE WRAPPERS ---
-  const updateNotes = (newNotes: Note[]) => setData(prev => ({ ...prev, notes: newNotes }));
-  const updateLinks = (newLinks: LinkItem[]) => setData(prev => ({ ...prev, links: newLinks }));
-  const updateVoiceNotes = (newVoiceNotes: VoiceNote[]) => setData(prev => ({ ...prev, voiceNotes: newVoiceNotes }));
+  // --- UPDATE WRAPPERS (CENTRALIZED LIKE PLANNER) ---
+  const updateNotes = (newNotes: Note[]) => saveData({ ...data, notes: newNotes });
+  const updateLinks = (newLinks: LinkItem[]) => saveData({ ...data, links: newLinks });
+  const updateVoiceNotes = (newVoiceNotes: VoiceNote[]) => saveData({ ...data, voiceNotes: newVoiceNotes });
 
   return (
     <SafeAreaView style={styles.container}>
@@ -203,8 +189,8 @@ export default function NotesScreen() {
           icon={activeRecording ? "mic" : "mic-outline"} 
           active={activeTab === 'voice'} 
           onPress={() => setActiveTab('voice')}
-          extraStyle={activeRecording ? { borderColor: theme.colors.danger, borderWidth: 1 } : {}}
-          textStyle={activeRecording ? { color: theme.colors.danger } : {}} 
+          extraStyle={activeRecording ? { borderColor: '#EF4444', borderWidth: 1 } : {}}
+          textStyle={activeRecording ? { color: '#EF4444' } : {}} 
         />
       </View>
 
@@ -228,7 +214,7 @@ export default function NotesScreen() {
 }
 
 // ==========================================
-// 4. TAB 1: NOTES (LOGIC FIXED HERE)
+// 4. TAB 1: NOTES
 // ==========================================
 
 const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) => void }) => {
@@ -248,7 +234,6 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
   const contentInputRef = useRef<TextInput>(null);
   const filteredNotes = notes.filter(n => n.title.toLowerCase().includes(search.toLowerCase()));
 
-  // 1. EDIT NOTE
   const handleNotePress = (note: Note) => {
     if (note.isLocked) {
       setPendingNote(note);
@@ -317,8 +302,6 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
     setModalVisible(false);
   };
 
-  // 2. COMPLETE / DELETE LOGIC (FIXED)
-  
   const performAction = (action: 'complete' | 'delete', note: Note) => {
     const isRecurring = note.recurrence && note.recurrence !== 'none';
     const actionLabel = action === 'complete' ? 'Complete' : 'Delete';
@@ -332,7 +315,6 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
                 { 
                     text: `${actionLabel} This Only`, 
                     onPress: () => {
-                        // Reschedule to next occurrence
                         const nextDate = calculateNextOccurrence(note.createdAt, note.recurrence!);
                         const updatedNote = { ...note, createdAt: nextDate };
                         setNotes(notes.map(n => n.id === note.id ? updatedNote : n));
@@ -342,14 +324,12 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
                     text: `${actionLabel} All Future`, 
                     style: 'destructive',
                     onPress: () => {
-                        // Remove entirely
                         setNotes(notes.filter(n => n.id !== note.id));
                     }
                 }
             ]
         );
     } else {
-        // Normal Note
         Alert.alert(
             actionLabel,
             `Are you sure you want to ${actionLabel.toLowerCase()} this note?`,
@@ -394,8 +374,8 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
         renderItem={({ item }) => (
           <SwipeableItem 
-            onSwipeRight={() => performAction('delete', item)} // Trigger delete logic on swipe
-            onSwipeLeft={() => handleNotePress(item)}
+            onSwipeRight={() => performAction('delete', item)}
+            onSwipeLeft={() => openEditor(item)}
             onPress={() => handleNotePress(item)}
           >
             <View style={styles.noteCard}>
@@ -420,7 +400,6 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
                   </Text>
                   
                   <View style={styles.row}>
-                      {/* Complete Button - Triggers Complete Logic */}
                       <TouchableOpacity onPress={() => performAction('complete', item)} style={{ padding: 4, marginRight: 8 }}>
                           <Ionicons name="checkmark-circle-outline" size={22} color={theme.colors.primary} />
                       </TouchableOpacity>
@@ -439,7 +418,6 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         <Ionicons name="add" size={32} color="#FFF" />
       </TouchableOpacity>
 
-      {/* Editor Modal */}
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <View style={styles.modalHeader}>
@@ -450,7 +428,6 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
           <ScrollView style={styles.editorContainer}>
              <TextInput style={styles.editorTitle} placeholder="Title" value={title} onChangeText={setTitle} placeholderTextColor="#999"/>
              
-             {/* Recurrence Selection */}
              <TouchableOpacity onPress={toggleRecurrence} style={styles.recurrenceSelector}>
                 <View style={styles.row}>
                     <MaterialCommunityIcons name="calendar-refresh" size={20} color={recurrence !== 'none' ? theme.colors.primary : '#999'} />
@@ -481,7 +458,6 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Lock Auth Modal */}
       <Modal visible={authVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
            <View style={styles.miniModal}>
@@ -499,7 +475,7 @@ const NotesTab = ({ notes, setNotes }: { notes: Note[], setNotes: (n: Note[]) =>
 };
 
 // ==========================================
-// 5. TAB 2: READ LATER (UNCHANGED)
+// 5. TAB 2: READ LATER
 // ==========================================
 
 const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: LinkItem[]) => void }) => {
@@ -584,7 +560,7 @@ const ReadLaterTab = ({ links, setLinks }: { links: LinkItem[], setLinks: (l: Li
 };
 
 // ==========================================
-// 6. TAB 3: VOICE NOTES (UNCHANGED)
+// 6. TAB 3: VOICE NOTES
 // ==========================================
 
 const VoiceTab = ({ voiceNotes, setVoiceNotes, activeRecording, activeTimer, onStartRecording, onStopRecording, onResetTimer }: any) => {
@@ -607,7 +583,6 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes, activeRecording, activeTimer, onS
   const [renameId, setRenameId] = useState<string|null>(null);
   const [newName, setNewName] = useState('');
 
-  // Animations
   useEffect(() => {
     if (activeRecording) {
         Animated.loop(Animated.sequence([
@@ -676,9 +651,9 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes, activeRecording, activeTimer, onS
                 <Text style={styles.modernTimerText}>{formatTime(activeTimer)}</Text>
             </View>
             <TouchableOpacity onPress={activeRecording ? handleStopRecording : onStartRecording}>
-                <Animated.View style={[styles.recordButtonOuter, activeRecording ? { transform: [{ scale: recordingAnim }], borderColor: theme.colors.danger } : {}]}>
-                    <View style={[styles.recordButtonInner, { backgroundColor: activeRecording ? theme.colors.danger : theme.colors.primary }]}>
-                          {activeRecording && <View style={styles.stopSquare} />}
+                <Animated.View style={[styles.recordButtonOuter, activeRecording ? { transform: [{ scale: recordingAnim }], borderColor: '#EF4444' } : {}]}>
+                    <View style={[styles.recordButtonInner, { backgroundColor: activeRecording ? '#EF4444' : theme.colors.primary }]}>
+                        {activeRecording && <View style={styles.stopSquare} />}
                     </View>
                 </Animated.View>
             </TouchableOpacity>
@@ -765,22 +740,32 @@ const VoiceTab = ({ voiceNotes, setVoiceNotes, activeRecording, activeTimer, onS
 };
 
 // ==========================================
-// 7. SWIPEABLE ITEM
+// 7. SWIPEABLE ITEM (ALIGNED WITH PLANNER LOGIC)
 // ==========================================
 
 const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { children: React.ReactNode, onSwipeRight: () => void, onSwipeLeft: () => void, onPress?: () => void }) => {
   const pan = useRef(new Animated.ValueXY()).current;
+  const SWIPE_THRESHOLD = 80;
+
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (evt, gestureState) => Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 20 && Math.abs(gestureState.dy) < 20,
       onPanResponderMove: Animated.event([null, { dx: pan.x }], { useNativeDriver: false }),
-      onPanResponderRelease: (evt, gestureState) => {
-        if (gestureState.dx > 100) {
-          Animated.timing(pan, { toValue: { x: 500, y: 0 }, duration: 200, useNativeDriver: false }).start(() => { onSwipeRight(); pan.setValue({ x: 0, y: 0 }); });
-        } else if (gestureState.dx < -100) {
-          Animated.timing(pan, { toValue: { x: -500, y: 0 }, duration: 200, useNativeDriver: false }).start(() => { onSwipeLeft(); Animated.spring(pan, { toValue: { x: 0, y: 0 }, friction: 5, useNativeDriver: false }).start(); });
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx > SWIPE_THRESHOLD) {
+          // Swipe Right -> Delete
+          Animated.spring(pan, { toValue: { x: SCREEN_WIDTH, y: 0 }, useNativeDriver: false }).start(() => {
+            onSwipeRight();
+            pan.setValue({ x: 0, y: 0 });
+          });
+        } else if (gestureState.dx < -SWIPE_THRESHOLD) {
+          // Swipe Left -> Edit
+          Animated.spring(pan, { toValue: { x: -SCREEN_WIDTH, y: 0 }, useNativeDriver: false }).start(() => {
+            onSwipeLeft();
+            pan.setValue({ x: 0, y: 0 });
+          });
         } else {
-          Animated.spring(pan, { toValue: { x: 0, y: 0 }, friction: 5, useNativeDriver: false }).start();
+          Animated.spring(pan, { toValue: { x: 0, y: 0 }, useNativeDriver: false }).start();
         }
       }
     })
@@ -789,10 +774,10 @@ const SwipeableItem = ({ children, onSwipeRight, onSwipeLeft, onPress }: { child
   return (
     <View style={styles.swipeContainer}>
       <View style={styles.swipeBackLayer}>
-         <Animated.View style={[styles.swipeLeftAction, { opacity: pan.x.interpolate({ inputRange: [0, 100], outputRange: [0, 1] }) }]}>
+         <Animated.View style={[styles.swipeLeftAction, { opacity: pan.x.interpolate({ inputRange: [0, SWIPE_THRESHOLD], outputRange: [0, 1] }) }]}>
             <Ionicons name="trash" size={24} color="#fff" /><Text style={{color:'#fff', fontWeight:'bold', marginLeft: 8}}>DELETE</Text>
          </Animated.View>
-         <Animated.View style={[styles.swipeRightAction, { opacity: pan.x.interpolate({ inputRange: [-100, 0], outputRange: [1, 0] }) }]}>
+         <Animated.View style={[styles.swipeRightAction, { opacity: pan.x.interpolate({ inputRange: [-SWIPE_THRESHOLD, 0], outputRange: [1, 0] }) }]}>
             <Text style={{color:'#fff', fontWeight:'bold', marginRight: 8}}>EDIT</Text><MaterialIcons name="edit" size={24} color="#fff" />
          </Animated.View>
       </View>
@@ -827,11 +812,11 @@ const styles = StyleSheet.create({
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', height: 44 },
   searchInput: { flex: 1, marginLeft: 8, fontSize: 16, color: '#333' },
   fab: { position: 'absolute', bottom: 24, right: 24, width: 60, height: 60, borderRadius: 30, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center', shadowColor: theme.colors.primary, shadowOpacity: 0.4, shadowOffset: {width:0, height:4}, shadowRadius: 8, elevation: 6 },
-  swipeContainer: { marginHorizontal: 16, position: 'relative' },
+  swipeContainer: { marginHorizontal: 16, position: 'relative', overflow: 'hidden', borderRadius: 12, marginBottom: 12 },
   swipeBackLayer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, borderRadius: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   swipeLeftAction: { backgroundColor: '#EF4444', position: 'absolute', left: 0, top: 0, bottom: 0, width: '100%', justifyContent: 'flex-start', alignItems:'center', flexDirection:'row', paddingLeft: 20 },
   swipeRightAction: { backgroundColor: '#3B82F6', position: 'absolute', right: 0, top: 0, bottom: 0, width: '100%', justifyContent: 'flex-end', alignItems:'center', flexDirection:'row', paddingRight: 20 },
-  noteCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#F3F4F6', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 6, elevation: 1, marginBottom: 12 },
+  noteCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#F3F4F6', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 6, elevation: 1 },
   noteCardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   noteCardTitle: { fontSize: 17, fontWeight: '700', color: '#1F2937', flex: 1 },
   noteCardPreview: { fontSize: 14, color: '#6B7280', lineHeight: 20, height: 40 },
@@ -839,7 +824,7 @@ const styles = StyleSheet.create({
   noteDate: { fontSize: 12, color: '#9CA3AF' },
   recurrenceBadge: { backgroundColor: theme.colors.primary, borderRadius: 4, padding: 2, marginRight: 4 },
   recurrenceSelector: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', marginBottom: 10 },
-  linkCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 12 },
+  linkCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E5E7EB' },
   linkHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   iconCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
   linkTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937' },

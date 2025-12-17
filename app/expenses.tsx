@@ -1,4 +1,5 @@
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -6,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  Dimensions,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -18,14 +20,14 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-
 import { SafeAreaView } from 'react-native-safe-area-context';
-
 import { theme } from '../src/theme/theme';
 
 // ==========================================
-// 1. TYPES & DATA
+// 1. CONFIGURATION & TYPES
 // ==========================================
+const STORAGE_KEY = 'expenses_data_store_v3';
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 type TransactionType = 'credit' | 'debit';
 type PaymentMethod = 'Online' | 'Cash' | 'Card' | 'Bank';
@@ -37,7 +39,7 @@ type Transaction = {
   type: TransactionType;
   category: string;
   paymentMethod: PaymentMethod;
-  date: string; // ISO String
+  date: string;
   note?: string;
   isArchived?: boolean;
 };
@@ -47,11 +49,6 @@ type ExpenseDataStore = {
   currencySymbol: string;
   monthlyBudget: number;
 };
-
-// --- PERSISTENCE CONFIGURATION ---
-// @ts-ignore
-const DOC_DIR = FileSystem.documentDirectory || '';
-const DATA_FILE = DOC_DIR + 'expenses_data_store.json';
 
 const INCOME_CATEGORIES = ['Salary', 'Freelance', 'Business', 'Investment', 'Gift', 'General'];
 const EXPENSE_CATEGORIES = ['Food', 'Transport', 'Rent', 'Shopping', 'Health', 'Bills', 'Entertainment', 'General'];
@@ -77,39 +74,9 @@ const formatDate = (isoString: string) => {
   return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-// --- STORAGE HELPERS ---
-
-const saveData = async (data: ExpenseDataStore) => {
-  if (!DOC_DIR) return;
-  try {
-    await FileSystem.writeAsStringAsync(DATA_FILE, JSON.stringify(data));
-    // console.log('Data saved successfully');
-  } catch (error) {
-    console.error('Error saving expenses:', error);
-  }
-};
-
-const loadData = async (): Promise<ExpenseDataStore> => {
-  const defaultData: ExpenseDataStore = { transactions: [], currencySymbol: '₹', monthlyBudget: 10000 };
-  
-  if (!DOC_DIR) return defaultData;
-  
-  try {
-    const info = await FileSystem.getInfoAsync(DATA_FILE);
-    if (!info.exists) return defaultData;
-    
-    const content = await FileSystem.readAsStringAsync(DATA_FILE);
-    const parsed = JSON.parse(content);
-
-    return {
-       transactions: parsed.transactions || [],
-       currencySymbol: parsed.currencySymbol || '₹',
-       monthlyBudget: parsed.monthlyBudget || 10000
-    };
-  } catch (error) {
-    console.log('Load Error', error);
-    return defaultData;
-  }
+const getTodayString = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 // ==========================================
@@ -121,41 +88,51 @@ export default function ExpensesScreen() {
   const [data, setData] = useState<ExpenseDataStore>({ transactions: [], currencySymbol: '₹', monthlyBudget: 10000 });
   const [loading, setLoading] = useState(true);
 
-  // --- 1. LOAD ON STARTUP ---
   useEffect(() => {
-    let isMounted = true;
-    loadData().then((d) => {
-      if (isMounted) {
-        setData(d);
-        setLoading(false); // Only allow saving AFTER loading is done
+    (async () => {
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setData({
+            transactions: parsed.transactions || [],
+            currencySymbol: parsed.currencySymbol || '₹',
+            monthlyBudget: parsed.monthlyBudget || 10000
+          });
+        }
+      } catch (e) {
+        console.log('Load error', e);
+      } finally {
+        setLoading(false);
       }
-    });
-    return () => { isMounted = false; };
+    })();
   }, []);
 
-  // --- 2. AUTO-SAVE WHEN DATA CHANGES ---
-  useEffect(() => {
-    // CRITICAL: Do not save if we are still loading!
-    if (!loading) {
-        saveData(data);
+  const saveToStorage = async (nextData: ExpenseDataStore) => {
+    setData(nextData);
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+    } catch (e) {
+      console.error('Save error', e);
     }
-  }, [data, loading]);
+  };
 
   const addTransaction = (t: Transaction) => {
-    setData(prev => ({ ...prev, transactions: [t, ...prev.transactions] }));
+    const next = { ...data, transactions: [t, ...data.transactions] };
+    saveToStorage(next);
   };
 
   const deleteTransaction = (id: string) => {
-    // Hard delete
-    setData(prev => ({ ...prev, transactions: prev.transactions.filter(t => t.id !== id) }));
+    const next = { ...data, transactions: data.transactions.filter(t => t.id !== id) };
+    saveToStorage(next);
   };
 
   const archiveTransaction = (id: string) => {
-    // Soft delete (Hide from main view)
-    setData(prev => ({
-      ...prev,
-      transactions: prev.transactions.map(t => t.id === id ? { ...t, isArchived: true } : t)
-    }));
+    const next = {
+      ...data,
+      transactions: data.transactions.map(t => t.id === id ? { ...t, isArchived: true } : t)
+    };
+    saveToStorage(next);
   };
 
   const importData = async () => {
@@ -170,26 +147,17 @@ export default function ExpensesScreen() {
       if (parsedData.transactions && Array.isArray(parsedData.transactions)) {
         Alert.alert('Import', 'Merge or Replace?', [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Merge', onPress: () => setData(prev => ({ ...prev, transactions: [...parsedData.transactions, ...prev.transactions] })) },
-            { text: 'Replace', style: 'destructive', onPress: () => setData(parsedData) }
+            { text: 'Merge', onPress: () => saveToStorage({ ...data, transactions: [...parsedData.transactions, ...data.transactions] }) },
+            { text: 'Replace', style: 'destructive', onPress: () => saveToStorage(parsedData) }
         ]);
-      } else {
-        Alert.alert('Error', 'Invalid file format');
       }
     } catch (e) { Alert.alert('Error', 'Import failed'); }
   };
 
-  if (loading) {
-    return (
-        <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-            <Text style={{color: '#666'}}>Loading Finances...</Text>
-        </SafeAreaView>
-    );
-  }
+  if (loading) return null;
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Finance Manager</Text>
@@ -200,14 +168,12 @@ export default function ExpensesScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* TABS */}
       <View style={styles.tabBar}>
         <TabButton title="Dashboard" icon="grid-outline" active={activeTab === 'dashboard'} onPress={() => setActiveTab('dashboard')} />
         <TabButton title="History" icon="list-outline" active={activeTab === 'history'} onPress={() => setActiveTab('history')} />
         <TabButton title="Insights" icon="pie-chart-outline" active={activeTab === 'insights'} onPress={() => setActiveTab('insights')} />
       </View>
 
-      {/* CONTENT */}
       <View style={styles.content}>
         {activeTab === 'dashboard' && (
           <DashboardTab 
@@ -240,8 +206,6 @@ export default function ExpensesScreen() {
 
 const DashboardTab = ({ data, addTransaction, onSeeAll, onDelete, onArchive }: any) => {
   const [modalVisible, setModalVisible] = useState(false);
-  
-  // Filter out archived for calculations
   const activeTransactions = data.transactions.filter((t: Transaction) => !t.isArchived);
 
   const totalIncome = activeTransactions.filter((t: Transaction) => t.type === 'credit').reduce((acc: number, curr: Transaction) => acc + curr.amount, 0);
@@ -318,31 +282,16 @@ const HistoryTab = ({ transactions, onDelete, onArchive, onImport }: any) => {
   const [search, setSearch] = useState('');
 
   const filtered = transactions.filter((t: Transaction) => {
-    if (filter === 'archived') {
-      return t.isArchived === true;
-    }
+    if (filter === 'archived') return t.isArchived === true;
     if (t.isArchived) return false;
-
     const matchesFilter = filter === 'all' ? true : t.type === filter;
     const matchesSearch = t.title.toLowerCase().includes(search.toLowerCase()) || t.category.toLowerCase().includes(search.toLowerCase());
     return matchesFilter && matchesSearch;
   });
 
-  const handleExport = () => {
-    Alert.alert('Export Data', 'Choose format:', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'CSV', onPress: () => exportFile('csv') },
-      { text: 'JSON', onPress: () => exportFile('json') }
-    ]);
-  };
-
   const exportFile = async (format: 'csv' | 'json') => {
     try {
-      if (!DOC_DIR) {
-        Alert.alert('Error', 'Device storage is not accessible.');
-        return;
-      }
-
+      const docDir = (FileSystem as any).documentDirectory || '';
       let content = '';
       let fileName = `expenses_export.${format}`;
 
@@ -355,19 +304,10 @@ const HistoryTab = ({ transactions, onDelete, onArchive, onImport }: any) => {
         });
       }
 
-      const uri = DOC_DIR + fileName;
-      await FileSystem.writeAsStringAsync(uri, content, {
-        encoding: 'utf8' 
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri);
-      } else {
-        Alert.alert('Error', 'Sharing is not available on this device');
-      }
-
-    } catch (error: any) {
-      console.error("Export Error:", error);
+      const uri = docDir + fileName;
+      await FileSystem.writeAsStringAsync(uri, content, { encoding: 'utf8' });
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
+    } catch (error) {
       Alert.alert('Export Failed', 'An error occurred.');
     }
   };
@@ -380,7 +320,7 @@ const HistoryTab = ({ transactions, onDelete, onArchive, onImport }: any) => {
           <TextInput style={styles.searchInput} placeholder="Search..." value={search} onChangeText={setSearch} />
         </View>
         <TouchableOpacity style={styles.iconBtn} onPress={onImport}><Ionicons name="cloud-upload-outline" size={20} color="#333" /></TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn} onPress={handleExport}><Ionicons name="download-outline" size={20} color="#333" /></TouchableOpacity>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => exportFile('json')}><Ionicons name="download-outline" size={20} color="#333" /></TouchableOpacity>
       </View>
 
       <View style={styles.segmentRow}>
@@ -436,7 +376,6 @@ const InsightsTab = ({ transactions }: { transactions: Transaction[] }) => {
 
   return (
     <ScrollView style={styles.flex1} contentContainerStyle={{ padding: 16 }}>
-      
       <View style={styles.insightToggleContainer}>
          <TouchableOpacity 
            style={[styles.insightToggleBtn, insightType === 'debit' && styles.insightToggleActive]}
@@ -468,7 +407,6 @@ const InsightsTab = ({ transactions }: { transactions: Transaction[] }) => {
       </View>
 
       <Text style={styles.sectionTitle}>Categories</Text>
-      
       {sortedCategories.map((cat, index) => (
         <View key={index} style={styles.statRow}>
           <View style={styles.statInfo}>
@@ -510,32 +448,30 @@ const SimplePieChart = ({ data }: { data: any[] }) => {
 };
 
 // ==========================================
-// 7. SWIPEABLE CARD COMPONENT
+// 7. SWIPEABLE CARD (PLANNER STYLE)
 // ==========================================
 
 const SwipeableTransaction = ({ item, onDelete, onArchive }: { item: Transaction, onDelete: () => void, onArchive: () => void }) => {
   const pan = useRef(new Animated.ValueXY()).current;
-  
+  const SWIPE_THRESHOLD = 80;
+
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        return Math.abs(gestureState.dx) > 10;
-      },
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 20,
       onPanResponderMove: Animated.event([null, { dx: pan.x }], { useNativeDriver: false }),
-      onPanResponderRelease: (evt, gestureState) => {
-        if (gestureState.dx > 120) {
-          // Swipe Right -> Delete
-          Animated.timing(pan, { toValue: { x: 500, y: 0 }, duration: 200, useNativeDriver: false }).start(() => {
-             onDelete();
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx > SWIPE_THRESHOLD) {
+          Animated.spring(pan, { toValue: { x: SCREEN_WIDTH, y: 0 }, useNativeDriver: false }).start(() => {
+            onDelete();
+            pan.setValue({ x: 0, y: 0 });
           });
-        } else if (gestureState.dx < -120) {
-          // Swipe Left -> Archive
-          Animated.timing(pan, { toValue: { x: -500, y: 0 }, duration: 200, useNativeDriver: false }).start(() => {
-             onArchive();
+        } else if (gestureState.dx < -SWIPE_THRESHOLD) {
+          Animated.spring(pan, { toValue: { x: -SCREEN_WIDTH, y: 0 }, useNativeDriver: false }).start(() => {
+            onArchive();
+            pan.setValue({ x: 0, y: 0 });
           });
         } else {
-          // Reset
-          Animated.spring(pan, { toValue: { x: 0, y: 0 }, friction: 5, useNativeDriver: false }).start();
+          Animated.spring(pan, { toValue: { x: 0, y: 0 }, useNativeDriver: false }).start();
         }
       }
     })
@@ -547,13 +483,7 @@ const SwipeableTransaction = ({ item, onDelete, onArchive }: { item: Transaction
          <View style={styles.swipeLeftAction}><Ionicons name="trash" size={24} color="#fff" /></View>
          <View style={styles.swipeRightAction}><Ionicons name="archive" size={24} color="#fff" /></View>
       </View>
-
-      <Animated.View 
-        style={[
-          { transform: [{ translateX: pan.x }], backgroundColor: '#fff', borderRadius: 16 }, 
-        ]} 
-        {...panResponder.panHandlers}
-      >
+      <Animated.View style={[{ transform: [{ translateX: pan.x }] }]} {...panResponder.panHandlers}>
         <TransactionCard item={item} />
       </Animated.View>
     </View>
@@ -579,7 +509,7 @@ const TransactionCard = ({ item }: { item: Transaction }) => {
 };
 
 // ==========================================
-// 8. ADD MODAL
+// 8. ADD MODAL (FORM RESET & DATE AUTO-TAKE)
 // ==========================================
 
 const AddTransactionModal = ({ visible, onClose, onSave }: any) => {
@@ -588,119 +518,95 @@ const AddTransactionModal = ({ visible, onClose, onSave }: any) => {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('General');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Online');
-  const [date, setDate] = useState(new Date());
-  
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [dateText, setDateText] = useState('');
+  const [dateText, setDateText] = useState(getTodayString()); // DEFAULT TO TODAY
 
-  useEffect(() => {
-    if (visible) {
-      setAmount(''); setTitle(''); 
-      setCategory('General'); 
-      setPaymentMethod('Online'); 
-      setDate(new Date());
-      setDateText('');
-      setShowDatePicker(false);
-    }
-  }, [visible]);
+  // Reset form whenever modal opens or closes
+  const resetForm = () => {
+    setType('debit');
+    setAmount('');
+    setTitle('');
+    setCategory('General');
+    setPaymentMethod('Online');
+    setDateText(getTodayString());
+  };
 
   const handleSave = () => {
-    if (!amount || isNaN(Number(amount))) {
-      Alert.alert('Error', 'Please enter a valid amount');
-      return;
-    }
-    if (!title) {
-      Alert.alert('Error', 'Please enter a description');
-      return;
-    }
+    if (!amount || isNaN(Number(amount))) return Alert.alert('Error', 'Invalid amount');
+    
+    // Description is now optional; defaults to Untitled if empty
+    const finalTitle = title.trim() || 'Untitled Transaction';
 
-    let finalDate = date;
-    if (showDatePicker && dateText) {
+    let finalDate = new Date();
+    if (dateText) {
        const parts = dateText.split('-');
        if(parts.length === 3) {
          finalDate = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
        }
     }
 
-    const newTx: Transaction = {
+    onSave({
       id: Date.now().toString(),
-      title,
+      title: finalTitle,
       amount: parseFloat(amount),
       type,
       category,
       paymentMethod,
       date: finalDate.toISOString(),
       isArchived: false,
-    };
+    });
 
-    onSave(newTx);
+    resetForm(); // AUTOMATICALLY EMPTY FORM AFTER ADDING
     onClose();
   };
 
-  const categories = type === 'credit' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+    <Modal 
+      visible={visible} 
+      animationType="slide" 
+      presentationStyle="pageSheet"
+      onShow={resetForm} // Ensure clean state when shown
+    >
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={styles.modalHeader}>
            <Text style={styles.modalTitle}>Add Transaction</Text>
            <TouchableOpacity onPress={onClose}><Ionicons name="close" size={24} color="#333" /></TouchableOpacity>
         </View>
-        
         <ScrollView style={styles.modalContent}>
           <View style={styles.typeSegment}>
             <TouchableOpacity onPress={() => setType('debit')} style={[styles.typeBtn, type === 'debit' && styles.typeBtnActiveDebit]}>
-               <Text style={[styles.typeText, type === 'debit' && { color: '#fff' }]}>Expense</Text>
+                <Text style={[styles.typeText, type === 'debit' && { color: '#fff' }]}>Expense</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setType('credit')} style={[styles.typeBtn, type === 'credit' && styles.typeBtnActiveCredit]}>
-               <Text style={[styles.typeText, type === 'credit' && { color: '#fff' }]}>Income</Text>
+                <Text style={[styles.typeText, type === 'credit' && { color: '#fff' }]}>Income</Text>
             </TouchableOpacity>
           </View>
-
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Amount</Text>
             <TextInput style={styles.amountInput} placeholder="0.00" keyboardType="numeric" value={amount} onChangeText={setAmount} autoFocus />
           </View>
-
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Description</Text>
-            <TextInput style={styles.textInput} placeholder="What is this for?" value={title} onChangeText={setTitle} />
+            <Text style={styles.label}>Description (Optional)</Text>
+            <TextInput style={styles.textInput} placeholder="e.g. Grocery, Salary" value={title} onChangeText={setTitle} />
           </View>
-
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Category</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginTop: 8 }}>
-              {categories.map(cat => (
+              {(type === 'credit' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(cat => (
                 <TouchableOpacity key={cat} onPress={() => setCategory(cat)} style={[styles.chip, category === cat && styles.chipActive]}>
                   <Text style={[styles.chipText, category === cat && { color: '#fff' }]}>{cat}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
-
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Payment Method</Text>
-            <View style={styles.rowWrap}>
-              {['Online', 'Cash', 'Card', 'Bank'].map((method) => (
-                <TouchableOpacity key={method} onPress={() => setPaymentMethod(method as PaymentMethod)} style={[styles.methodCard, paymentMethod === method && styles.methodCardActive]}>
-                  <Ionicons name={method === 'Cash' ? 'cash-outline' : method === 'Card' ? 'card-outline' : method === 'Online' ? 'wifi' : 'business-outline'} size={20} color={paymentMethod === method ? theme.colors.primary : '#666'} />
-                  <Text style={[styles.methodText, paymentMethod === method && { color: theme.colors.primary, fontWeight:'bold' }]}>{method}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Text style={styles.label}>Date (YYYY-MM-DD)</Text>
+            <TextInput 
+              style={styles.textInput} 
+              placeholder="YYYY-MM-DD" 
+              value={dateText} 
+              onChangeText={setDateText} 
+            />
           </View>
-
-          <View style={styles.inputGroup}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.label}>Date</Text>
-                <TouchableOpacity onPress={() => setShowDatePicker(!showDatePicker)}>
-                   <Text style={{color: theme.colors.primary}}>{showDatePicker ? 'Use Today' : 'Change Date'}</Text>
-                </TouchableOpacity>
-              </View>
-              {!showDatePicker ? <Text style={styles.dateDisplay}>{date.toDateString()}</Text> : <TextInput style={styles.textInput} placeholder="YYYY-MM-DD" value={dateText} onChangeText={setDateText} />}
-          </View>
-
-          <View style={{height: 40}} />
           <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
               <Text style={styles.saveButtonText}>Save Transaction</Text>
           </TouchableOpacity>
@@ -726,24 +632,17 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
   flex1: { flex: 1 },
   row: { flexDirection: 'row', alignItems: 'center' },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rowWrap: { flexDirection: 'row', flexWrap: 'wrap' },
-
   header: { padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   headerTitle: { fontSize: 24, fontWeight: '800', color: '#111827' },
   headerSubtitle: { fontSize: 13, color: '#6B7280' },
   headerIconBtn: { padding: 8, backgroundColor: '#F3F4F6', borderRadius: 20 },
-
   tabBar: { flexDirection: 'row', padding: 6, marginHorizontal: 16, marginTop: 16, backgroundColor: '#E5E7EB', borderRadius: 12 },
   tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10 },
   tabBtnActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
   tabText: { marginLeft: 6, fontWeight: '600', color: '#6B7280', fontSize: 13 },
   tabTextActive: { color: theme.colors.primary, fontWeight: '700' },
-
   content: { flex: 1, marginTop: 10 },
-
-  // Dashboard
-  balanceCard: { backgroundColor: '#111827', borderRadius: 20, padding: 24, marginBottom: 20, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10, elevation: 5 },
+  balanceCard: { backgroundColor: '#111827', borderRadius: 20, padding: 24, marginBottom: 20 },
   balanceLabel: { color: '#9CA3AF', fontSize: 14, fontWeight: '500' },
   balanceAmount: { color: '#fff', fontSize: 32, fontWeight: '800', marginVertical: 8 },
   balanceRow: { flexDirection: 'row', marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
@@ -752,27 +651,20 @@ const styles = StyleSheet.create({
   balanceSubLabel: { color: '#9CA3AF', fontSize: 12 },
   incomeText: { color: '#4ADE80', fontWeight: '700', fontSize: 16 },
   expenseText: { color: '#F87171', fontWeight: '700', fontSize: 16 },
-
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
   seeAllText: { color: theme.colors.primary, fontWeight: '600' },
   emptyText: { textAlign: 'center', color: '#999', marginTop: 20 },
-
-  // Swipeable
-  swipeContainer: { marginBottom: 10, position: 'relative' },
-  swipeBackLayer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, borderRadius: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20 },
-  swipeLeftAction: { backgroundColor: '#EF4444', position: 'absolute', left: 0, top: 0, bottom: 0, width: '50%', borderTopLeftRadius: 16, borderBottomLeftRadius: 16, justifyContent: 'center', paddingLeft: 20 },
-  swipeRightAction: { backgroundColor: '#3B82F6', position: 'absolute', right: 0, top: 0, bottom: 0, width: '50%', borderTopRightRadius: 16, borderBottomRightRadius: 16, justifyContent: 'center', alignItems: 'flex-end', paddingRight: 20 },
-
+  swipeContainer: { marginHorizontal: 16, marginBottom: 10, position: 'relative', overflow: 'hidden', borderRadius: 16 },
+  swipeBackLayer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, borderRadius: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  swipeLeftAction: { backgroundColor: '#EF4444', position: 'absolute', left: 0, top: 0, bottom: 0, width: '50%', justifyContent: 'center', paddingLeft: 20 },
+  swipeRightAction: { backgroundColor: '#3B82F6', position: 'absolute', right: 0, top: 0, bottom: 0, width: '50%', justifyContent: 'center', alignItems: 'flex-end', paddingRight: 20 },
   transCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 14, borderRadius: 16, borderWidth: 1, borderColor: '#F3F4F6' },
   iconBox: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   transTitle: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
   transSub: { fontSize: 12, color: '#6B7280', marginTop: 2 },
   transAmount: { fontSize: 16, fontWeight: '700' },
-
-  fab: { position: 'absolute', bottom: 24, right: 24, width: 60, height: 60, borderRadius: 30, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center', shadowColor: theme.colors.primary, shadowOpacity: 0.4, shadowOffset: {width:0, height:4}, shadowRadius: 8, elevation: 6 },
-
-  // History Tab
+  fab: { position: 'absolute', bottom: 24, right: 24, width: 60, height: 60, borderRadius: 30, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center' },
   filterContainer: { flexDirection: 'row', padding: 16, paddingBottom: 0, gap: 10 },
   searchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 12, height: 44, borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB' },
   searchInput: { flex: 1, marginLeft: 8, fontSize: 15 },
@@ -782,21 +674,17 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: '#1F2937' },
   segmentText: { color: '#6B7280', fontWeight: '600', fontSize: 13 },
   segmentTextActive: { color: '#fff' },
-
-  // Insights
   insightToggleContainer: { flexDirection: 'row', backgroundColor: '#E5E7EB', padding: 4, borderRadius: 12, marginBottom: 20 },
   insightToggleBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 8 },
   insightToggleActive: { backgroundColor: theme.colors.primary },
   insightToggleText: { fontWeight: '600', color: '#6B7280' },
-
   chartCard: { backgroundColor: '#fff', padding: 20, borderRadius: 20, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#E5E7EB' },
   chartTitle: { fontSize: 14, color: '#6B7280', fontWeight: '600', marginBottom: 20 },
   pieContainer: { alignItems: 'center', justifyContent: 'center' },
   pieCenterOverlay: { position: 'absolute', alignItems: 'center' },
   chartTotal: { fontSize: 24, fontWeight: '800', color: '#111' },
   chartSub: { fontSize: 12, color: '#9CA3AF' },
-  
-  statRow: { marginBottom: 16, backgroundColor: '#fff', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#F9FAFB' },
+  statRow: { marginBottom: 16, backgroundColor: '#fff', padding: 12, borderRadius: 12 },
   statInfo: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   dot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
   statName: { fontSize: 15, fontWeight: '600', color: '#333' },
@@ -804,8 +692,6 @@ const styles = StyleSheet.create({
   progressBarBg: { height: 6, backgroundColor: '#F3F4F6', borderRadius: 3, marginBottom: 4 },
   progressBarFill: { height: '100%', borderRadius: 3 },
   statPercent: { fontSize: 11, color: '#999', textAlign: 'right' },
-
-  // Modal
   modalHeader: { padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#eee' },
   modalTitle: { fontSize: 18, fontWeight: '700' },
   modalContent: { padding: 20 },
@@ -821,10 +707,6 @@ const styles = StyleSheet.create({
   chip: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#F3F4F6', marginRight: 8, borderWidth: 1, borderColor: '#E5E7EB' },
   chipActive: { backgroundColor: '#1F2937', borderColor: '#1F2937' },
   chipText: { fontWeight: '600', color: '#4B5563' },
-  methodCard: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', marginRight: 10, marginBottom: 10, backgroundColor: '#fff' },
-  methodCardActive: { borderColor: theme.colors.primary, backgroundColor: '#EFF6FF' },
-  methodText: { marginLeft: 6, color: '#666', fontWeight: '500' },
-  dateDisplay: { fontSize: 16, fontWeight: '600', color: '#111', marginTop: 4 },
-  saveButton: { backgroundColor: theme.colors.primary, paddingVertical: 16, borderRadius: 16, alignItems: 'center', shadowColor: theme.colors.primary, shadowOpacity: 0.3, shadowOffset: {width:0, height:4} },
+  saveButton: { backgroundColor: theme.colors.primary, paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
   saveButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 }
 });
